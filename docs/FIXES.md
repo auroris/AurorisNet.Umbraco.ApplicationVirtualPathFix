@@ -19,6 +19,8 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 | The logo in the header's system-information popover uses a root-absolute URL. | The logo resolves relative to the served module, retaining its prefix and asset hash. |
 | The block grid editor loads its default layout stylesheet from `/umbraco/backoffice/css/...`, and resolves a custom layout stylesheet's site path against the host root. | Both stylesheets load under the prefix. |
 | The media upload field and the preview prepend the server URL to media and page URLs that already include the virtual path. | Image previews, file links and the preview frame use the URL once. |
+| Tiptap's default stylesheet, Monaco's worker scripts and the dark/high-contrast theme stylesheets use root URLs. | They resolve beside the served modules, retaining the application prefix and asset hash. |
+| Basic-authentication routes already include the application prefix, so MVC adds it twice to form actions and redirects. | Login forms and two-factor redirects contain the prefix once; `Url.Content` still sees the original path base. |
 | The stylesheet of Umbraco's built-in Page Not Found, No Content, Maintenance and Upgrading pages loads its fonts and background from the root. | They load from beside the stylesheet, under the prefix. |
 | Initial authentication attempts a token refresh before a fresh browser has received a refresh cookie. | The auth wrapper starts the normal sign-in flow directly when no session can exist. Existing sessions continue through Umbraco's token validation and renewal. |
 
@@ -55,6 +57,14 @@ an IIS child application, set `ApplicationVirtualPath` to that application's pat
 Kestrel uses the same setting to establish the path base. Route only the prefix to
 the site; Kestrel otherwise also answers unprefixed URLs.
 
+An existing host-supplied path base is preserved, including when a content slug
+repeats the application prefix. If using ASP.NET Core response compression, register
+`UseResponseCompression()` **before** `UseUmbraco()` so patched assets are compressed
+after rewriting. For the small set of responses it buffers, the package suppresses
+compression registered later in the pipeline. Precompressed responses from custom
+handlers are passed through unchanged; those handlers must provide uncompressed
+versions of assets that need rewriting.
+
 Under a virtual path, `server-url` comes from the request's scheme and host. Behind
 a reverse proxy or load balancer, apply `X-Forwarded-Proto` and `X-Forwarded-Host`
 with `UseForwardedHeaders` before `UseUmbraco`, or have the proxy preserve the
@@ -80,26 +90,34 @@ each site through Chromium:
 | Site root | Open `/` and `/umbraco`. |
 | Kestrel subdirectory | Open `/SomeTestPath/...`; the fixture returns 404 for requests outside `/SomeTestPath`. |
 | Kestrel subdirectory, external media | As above, with media stored in a folder outside `wwwroot`. |
+| Kestrel HTTPS subdirectory | A temporary certificate exercises secure cookies and cross-site session restoration. |
 | IIS child application | The fixture sets the path base before the package runs and removes WebSocket support, as IIS without the WebSocket Protocol feature does, with external media. |
 | Basic authentication | Kestrel subdirectory with the basic-authentication login page enabled. |
 
-The first four cases each:
+The five starter-kit cases each:
 
 - request the OpenAPI documents;
 - visit every front-end page reachable from the home page and check that each image loads;
 - request a password reset and follow the emailed link to the new-password form;
 - sign in to the backoffice and check the dashboard and the header logo;
 - reload and check that the session is restored through a token refresh;
+- invite an editor and follow the emailed link to the password form;
+- edit rich text, ask the JSON worker to validate invalid code, and load dark and high-contrast themes;
 - create a page, publish it and open it on the front end;
+- preview unpublished changes, save a second draft, and verify that the open preview updates while the public page remains unchanged;
 - upload an image, check every link to it in the backoffice, then open it and a resized version.
 
-The basic-authentication case opens the site, signs in on Umbraco's login page and
-checks that the home page loads.
+The basic-authentication case checks a two-factor redirect, retries after an invalid
+password, signs in and checks that the home page loads. The IIS-style case
+also uses a content slug matching the application prefix. Focused middleware tests
+cover response-compression ordering, conditional responses, precompressed content
+and session hints.
 
 Any browser console error, uncaught JavaScript exception, failed request or HTTP
 error fails the test, and so does any error the site logs or any warning from the
-package. The starter kit embeds third-party content (Google Fonts, jQuery, YouTube,
-OpenStreetMap), so the suite needs internet access, and an outage there can fail
-it. These checks run over HTTP on Kestrel. Live IIS deployment and HTTPS require
-their own deployment validation. See [Developing and releasing](DEVELOPING.md) to
-run the suite.
+package. The starter kit's external dependencies receive deterministic local
+responses; unexpected external requests fail. Browser routing disables its HTTP
+cache, so conditional-response behavior is tested separately with an HTTP client.
+These checks run over HTTP and HTTPS on Kestrel; live IIS still requires deployment
+validation. See [Developing and releasing](DEVELOPING.md) to run the suite and view
+the saved traces, screenshots and server logs.

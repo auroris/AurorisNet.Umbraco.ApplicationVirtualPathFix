@@ -1,4 +1,8 @@
 using System.Reflection;
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -19,12 +23,14 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 /// <param name="MediaOutsideWebRoot">Store media in an absolute folder outside wwwroot, as file-system providers such as Azure Blob Storage do.</param>
 /// <param name="WebSockets">False models a host without WebSocket support, so SignalR falls back to Server-Sent Events.</param>
 /// <param name="BasicAuth">Protect the front end with Umbraco's basic authentication and its login page.</param>
+/// <param name="Https">Use a disposable self-signed certificate to exercise secure cookies.</param>
 internal sealed record SiteOptions(
     string Prefix,
     bool ExistingPathBase = false,
     bool MediaOutsideWebRoot = false,
     bool WebSockets = true,
-    bool BasicAuth = false);
+    bool BasicAuth = false,
+    bool Https = false);
 
 /// <summary>
 /// A disposable site built like <c>dotnet new umbraco</c> with the starter kit: SQLite, Kestrel,
@@ -39,6 +45,7 @@ internal sealed class TestSite : IAsyncDisposable
     private readonly WebApplication _app;
     private readonly DateTimeOffset _startedAt;
     private bool _stopped;
+    private string? _artifacts;
 
     private TestSite(WebApplication app, string root, SiteOptions options, Uri address, DateTimeOffset startedAt)
     {
@@ -60,7 +67,13 @@ internal sealed class TestSite : IAsyncDisposable
     /// <summary>An absolute URL for a path relative to the application, such as <c>/umbraco</c>.</summary>
     public Uri Url(string path) => new(Address, Options.Prefix + path);
 
-    public static async Task<TestSite> StartAsync(SiteOptions options, CancellationToken cancellationToken)
+    public HttpClient CreateHttpClient() => new(new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = (request, _, _, errors) =>
+            errors == SslPolicyErrors.None || request.RequestUri?.Authority == Address.Authority,
+    });
+
+    public static async Task<TestSite> StartAsync(SiteOptions options, CancellationToken cancellationToken, string? artifacts = null)
     {
         var root = Directory.CreateTempSubdirectory("virtual-path-fix-test-").FullName;
         Directory.CreateDirectory(Path.Combine(root, "wwwroot"));
@@ -97,7 +110,7 @@ internal sealed class TestSite : IAsyncDisposable
             {
                 PublishImportedContent(app);
                 var address = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
-                return new TestSite(app, root, options, address, startedAt);
+                return new TestSite(app, root, options, address, startedAt) { _artifacts = artifacts };
             }
             catch
             {
@@ -109,6 +122,7 @@ internal sealed class TestSite : IAsyncDisposable
         }
         catch
         {
+            CopyLogs(root, artifacts);
             DeleteRoot(root);
             throw;
         }
@@ -136,6 +150,8 @@ internal sealed class TestSite : IAsyncDisposable
             ["ConnectionStrings:umbracoDbDSN_ProviderName"] = "Microsoft.Data.Sqlite",
             ["Umbraco:CMS:Global:Id"] = Guid.NewGuid().ToString(),
             ["Umbraco:CMS:Global:UseHttps"] = "false",
+            // Keep image authorization enabled across both boots, like a normally installed site.
+            ["Umbraco:CMS:Imaging:HMACSecretKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
             // Emails are written to a folder so the test can follow the links in them.
             ["Umbraco:CMS:Global:Smtp:From"] = "umbraco@example.test",
             ["Umbraco:CMS:Global:Smtp:DeliveryMethod"] = "SpecifiedPickupDirectory",
@@ -143,7 +159,7 @@ internal sealed class TestSite : IAsyncDisposable
             ["Umbraco:CMS:WebRouting:ApplicationUrlDetection"] = "FirstRequest",
             ["Umbraco:CMS:Hosting:ApplicationVirtualPath"] = options.Prefix,
             // As in the template's Development settings. Debug also serves backoffice modules with
-            // no-cache, so reloads exercise conditional (304) requests.
+            // no-cache; the HTTP checks below exercise conditional (304) requests.
             ["Umbraco:CMS:Hosting:Debug"] = "true",
             ["Umbraco:CMS:TypeFinder:AdditionalAssemblyExclusionEntries:0"] = "xunit.",
             ["Umbraco:CMS:Unattended:InstallUnattended"] = "true",
@@ -198,7 +214,22 @@ internal sealed class TestSite : IAsyncDisposable
         builder.Services.Replace(ServiceDescriptor.Singleton<INewsDashboardService, TestNews>());
         builder.Services.AddSingleton<IStartupFilter>(new HostShape(options));
 
+        X509Certificate2? certificate = null;
+        if (options.Https)
+        {
+            using var rsa = RSA.Create(2048);
+            var request = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var names = new SubjectAlternativeNameBuilder();
+            names.AddIpAddress(IPAddress.Loopback);
+            request.CertificateExtensions.Add(names.Build());
+            using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+            // Windows TLS cannot use CreateSelfSigned's ephemeral private key. Reimport the PFX
+            // so the key lasts until certificate disposal, without installing a trusted certificate.
+            certificate = X509CertificateLoader.LoadPkcs12(generated.Export(X509ContentType.Pfx), null);
+            builder.WebHost.ConfigureKestrel(server => server.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(certificate)));
+        }
         var app = builder.Build();
+        if (certificate is not null) app.Lifetime.ApplicationStopped.Register(certificate.Dispose);
         try
         {
             await app.BootUmbracoAsync();
@@ -232,6 +263,7 @@ internal sealed class TestSite : IAsyncDisposable
         await _app.StopAsync(CancellationToken.None);
         await _app.DisposeAsync();
         await Serilog.Log.CloseAndFlushAsync();
+        CopyLogs(Root, _artifacts);
 
         var problems = new List<string>();
         var logs = Path.Combine(Root, "umbraco", "Logs");
@@ -272,6 +304,15 @@ internal sealed class TestSite : IAsyncDisposable
         {
             DeleteRoot(Root);
         }
+    }
+
+    private static void CopyLogs(string root, string? artifacts)
+    {
+        var source = Path.Combine(root, "umbraco", "Logs");
+        if (artifacts is null || !Directory.Exists(source)) return;
+        var destination = Directory.CreateDirectory(Path.Combine(artifacts, "server-logs")).FullName;
+        foreach (var file in Directory.EnumerateFiles(source, "*.json"))
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true);
     }
 
     private static void DeleteRoot(string root)
@@ -325,6 +366,14 @@ internal sealed class TestSite : IAsyncDisposable
                     context.Features.Set<IHttpUpgradeFeature>(null);
                     context.Features.Set<IHttpExtendedConnectFeature>(null);
                     context.Features.Set<IHttpWebSocketFeature>(null);
+                }
+
+                if (context.Request.Path == options.Prefix + "/umbraco")
+                {
+                    // Playwright's intercepted request headers omit some browser-added headers.
+                    // Report what the server actually received for the cross-site cookie test.
+                    context.Response.Headers["X-Test-Fetch-Site"] = context.Request.Headers["Sec-Fetch-Site"].ToString();
+                    context.Response.Headers["X-Test-Refresh-Cookie"] = context.Request.Cookies.Keys.Any(key => key.Contains("umbRefreshToken", StringComparison.Ordinal)) ? "yes" : "no";
                 }
 
                 await nextRequest(context);

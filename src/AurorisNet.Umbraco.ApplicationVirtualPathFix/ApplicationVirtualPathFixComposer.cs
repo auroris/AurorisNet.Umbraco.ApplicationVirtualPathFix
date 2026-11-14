@@ -1,12 +1,15 @@
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.Configuration;
+using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Core.DependencyInjection;
 using Umbraco.Cms.Core.Manifest;
 using Umbraco.Cms.Core.Models.Membership;
+using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services.OperationStatus;
 using Umbraco.Cms.Web.Common.ApplicationBuilder;
@@ -47,12 +50,15 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
             {
                 WarnOnUmbracoVersionMismatch(app.ApplicationServices);
                 if (VirtualPathHosting.Prefix(app.ApplicationServices.GetRequiredService<IHostingEnvironment>()) is { } prefix)
-                    app.UsePathBase(prefix);
+                    app.UseWhen(context => !context.Request.PathBase.HasValue, branch => branch.UsePathBase(prefix));
                 app.UseUmbracoPathsUnderPathBase();
                 app.UseBackOfficeAppUnderVirtualPath();
             },
             postPipeline: app => app.UseMediaUnderPathBase())));
         services.Replace(ServiceDescriptor.Singleton<IBackOfficePathGenerator, BackOfficePaths>());
+        Decorate<IUrlAssembler>(services, required: true,
+            (provider, inner) => new MediaUrlAssembler(inner, provider.GetRequiredService<IHostingEnvironment>(),
+                provider.GetRequiredService<IOptions<GlobalSettings>>().Value));
         Decorate<IPackageManifestService>(services, required: true,
             (provider, inner) => new VirtualPathImportMapService(inner, provider.GetRequiredService<IBackOfficePathGenerator>()));
         // Registered by the management API, which a site can leave out.

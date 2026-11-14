@@ -24,5 +24,7 @@
     -->
     <Content Remove="SiteTemplate/**" />
     <None Include="SiteTemplate/**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Remove="BrowserFixtures/**" />
+    <None Include="BrowserFixtures/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

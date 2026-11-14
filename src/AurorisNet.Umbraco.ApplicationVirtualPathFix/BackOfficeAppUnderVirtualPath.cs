@@ -87,7 +87,38 @@ internal static class BackOfficeAppUnderVirtualPath
             // the server URL's path when it ends with a slash.
             ("const n = new URL(s, t)", "const n = new URL(s, t.endsWith(\"/\") ? t : t + \"/\")"),
         ],
+        ["/packages/tiptap/input-tiptap.element-C2HEaB-_.js"] =
+        [
+            ("\"/umbraco/backoffice/css/rte-content.css\"",
+                "new URL(\"../../css/rte-content.css\", import.meta.url).pathname"),
+        ],
+        ["/packages/core/manifests.js"] =
+        [
+            ("css: \"/umbraco/backoffice/css/dark.css\"",
+                "css: new URL(\"../../css/dark.css\", import.meta.url).pathname"),
+            ("css: \"/umbraco/backoffice/css/high-contrast.css\"",
+                "css: new URL(\"../../css/high-contrast.css\", import.meta.url).pathname"),
+        ],
+        // Vite's worker constructors contain root URLs, independent of the import map.
+        ["/external/monaco-editor/rust-CWMmcrOS.js"] =
+        [
+            WorkerPatch("editor.worker-LB_7Ltyq.js"),
+            WorkerPatch("json.worker-DQOG4ivs.js"),
+            WorkerPatch("css.worker-B3BImrxk.js"),
+            WorkerPatch("html.worker-Cq-Lc34v.js"),
+            WorkerPatch("ts.worker-DMY5tkUi.js"),
+        ],
+        // These language modules already use new URL(..., import.meta.url).
+        ["/external/monaco-editor/jsonMode-C77h2I9n.js"] =
+            [("\"/umbraco/backoffice/external/monaco-editor/assets/", "\"./assets/")],
+        ["/external/monaco-editor/htmlMode-BQH4tjQN.js"] =
+            [("\"/umbraco/backoffice/external/monaco-editor/assets/", "\"./assets/")],
+        ["/external/monaco-editor/tsMode-rn8r1OtC.js"] =
+            [("\"/umbraco/backoffice/external/monaco-editor/assets/", "\"./assets/")],
     };
+
+    private static (string Pattern, string Replacement) WorkerPatch(string file)
+        => ($"\"/umbraco/backoffice/external/monaco-editor/assets/{file}\"", $"new URL(\"./assets/{file}\", import.meta.url)");
 
     private enum Target
     {
@@ -104,6 +135,7 @@ internal static class BackOfficeAppUnderVirtualPath
         var services = app.ApplicationServices;
         var paths = services.GetRequiredService<IBackOfficePathGenerator>();
         var backOfficePath = paths.BackOfficePath;
+        var basicAuthPath = new PathString(backOfficePath + "/basic-auth");
         // After UseUmbracoPathsUnderPathBase, hashed requests carry the virtual directory in their path.
         var modules = new Dictionary<PathString, string>();
         foreach (var module in ModulePatches.Keys)
@@ -123,7 +155,7 @@ internal static class BackOfficeAppUnderVirtualPath
         return app.Use(async (context, next) =>
         {
             var request = context.Request;
-            var target = Classify(request, modules, out var module);
+            var target = Classify(request, modules, basicAuthPath, out var module);
             if (target == Target.None)
             {
                 await next(context);
@@ -131,8 +163,12 @@ internal static class BackOfficeAppUnderVirtualPath
             }
 
             var originalBody = context.Response.Body;
+            var acceptEncoding = request.Headers.AcceptEncoding;
             using var buffer = new MemoryStream();
             context.Response.Body = buffer;
+            // A later response-compression middleware must leave the buffered bytes as text.
+            // Compression registered before UseUmbraco still compresses the patched response.
+            request.Headers.Remove("Accept-Encoding");
             try
             {
                 await next(context);
@@ -140,6 +176,8 @@ internal static class BackOfficeAppUnderVirtualPath
             finally
             {
                 context.Response.Body = originalBody;
+                if (acceptEncoding.Count > 0)
+                    request.Headers.AcceptEncoding = acceptEncoding;
             }
 
             // 304 and 204 responses must not be written to at all, and leaving any other empty
@@ -148,7 +186,10 @@ internal static class BackOfficeAppUnderVirtualPath
                 return;
 
             byte[] bytes = buffer.ToArray();
-            byte[]? patched = context.Response.StatusCode != StatusCodes.Status200OK ? null : target switch
+            // Custom handlers may serve precompressed files regardless of Accept-Encoding.
+            // Never decode those binary bytes as UTF-8.
+            byte[]? patched = context.Response.StatusCode != StatusCodes.Status200OK
+                || context.Response.Headers.ContentEncoding.Count > 0 ? null : target switch
             {
                 Target.Page => PatchPage(context, bytes),
                 Target.LoginScript => PatchLoginScript(request, bytes),
@@ -173,6 +214,14 @@ internal static class BackOfficeAppUnderVirtualPath
 
             var request = context.Request;
             var html = Encoding.UTF8.GetString(bytes);
+            if (request.PathBase.HasValue && request.Path.StartsWithSegments(basicAuthPath))
+            {
+                // MVC's basic-auth routes contain the virtual path already. Correct their
+                // generated form actions while preserving PathBase for Url.Content assets.
+                var doubled = HtmlEncoder.Default.Encode(request.PathBase + basicAuthPath);
+                var corrected = HtmlEncoder.Default.Encode(basicAuthPath.Value!);
+                html = html.Replace("\"" + doubled, "\"" + corrected, StringComparison.Ordinal);
+            }
             if (html.Contains("<umb-app ", StringComparison.Ordinal))
             {
                 var attributes = new StringBuilder();
@@ -235,11 +284,18 @@ internal static class BackOfficeAppUnderVirtualPath
         }
     }
 
-    private static Target Classify(HttpRequest request, Dictionary<PathString, string> modules, out string? module)
+    private static Target Classify(HttpRequest request, Dictionary<PathString, string> modules, PathString basicAuthPath, out string? module)
     {
         module = null;
         // In particular, never replace the response stream of a SignalR WebSocket upgrade.
-        if (!HttpMethods.IsGet(request.Method) || request.Headers.Upgrade.Count > 0)
+        if (request.Headers.Upgrade.Count > 0)
+            return Target.None;
+        // Failed basic-auth POSTs render the same forms as GETs, including their action URLs.
+        if ((HttpMethods.IsGet(request.Method) || HttpMethods.IsPost(request.Method))
+            && request.Path.StartsWithSegments(basicAuthPath)
+            && request.Headers.Accept.ToString().Contains("text/html", StringComparison.OrdinalIgnoreCase))
+            return Target.Page;
+        if (!HttpMethods.IsGet(request.Method))
             return Target.None;
         if (request.PathBase.HasValue)
         {

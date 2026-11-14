@@ -19,6 +19,7 @@
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <!--
       Depend on the parts of Umbraco the package uses rather than the Umbraco.Cms meta-package, so sites

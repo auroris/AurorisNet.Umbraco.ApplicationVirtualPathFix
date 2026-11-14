@@ -42,12 +42,42 @@ internal static class UmbracoPathsUnderPathBase
         // "/portal/umbraco/backoffice" -> "/portal"
         var virtualPath = new PathString(virtualDirectory[..^AssetsRoot.Value!.Length]);
         var hashedAssets = AssetsRoot.Add("/" + paths.BackOfficeCacheBustHash);
-        return app.Use((context, next) =>
+        return app.Use(async (context, next) =>
         {
             var request = context.Request;
-            if (request.PathBase.HasValue && ComparedWithVirtualPath(request.Path, hashedAssets))
-                request.Path = virtualPath.Add(request.Path);
-            return next(context);
+            var originalPath = request.Path;
+            var originalPathBase = request.PathBase;
+            if (!originalPathBase.HasValue || !ComparedWithVirtualPath(originalPath, hashedAssets))
+            {
+                await next(context);
+                return;
+            }
+
+            request.Path = virtualPath.Add(originalPath);
+            // Basic-auth routes already contain the prefix, so MVC prepends PathBase twice.
+            // Keep PathBase for Url.Content and custom views; correct only these redirect URLs.
+            if (originalPath.StartsWithSegments(BasicAuth))
+            {
+                var doubled = originalPathBase.Add(virtualPath).Add(BasicAuth).Value!;
+                var corrected = virtualPath.Add(BasicAuth).Value!;
+                context.Response.OnStarting(() =>
+                {
+                    var location = context.Response.Headers.Location.ToString();
+                    if (location.StartsWith(doubled, StringComparison.OrdinalIgnoreCase)
+                        && (location.Length == doubled.Length || location[doubled.Length] is '/' or '?' or '#'))
+                        context.Response.Headers.Location = corrected + location[doubled.Length..];
+                    return Task.CompletedTask;
+                });
+            }
+            try
+            {
+                await next(context);
+            }
+            finally
+            {
+                request.Path = originalPath;
+                request.PathBase = originalPathBase;
+            }
         });
     }
 

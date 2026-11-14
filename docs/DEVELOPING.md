@@ -19,14 +19,22 @@ Repeat the browser installation after upgrading Playwright. The tests build
 starter-kit sites with their own SQLite databases and start Kestrel on free
 loopback ports, one site at a time; a full run takes several minutes. When a step
 fails, the test output includes the page's accessibility tree, and screenshots are
-saved under `bin/Debug/net10.0/e2e-artifacts/<case>`, next to a `test-output.log`
-that is written for passing runs too. Set `AVPF_KEEP_TEST_SITE=1` to keep each
+saved under `bin/Debug/net10.0/e2e-artifacts/<case>/<run>`, next to a `test-output.log`,
+Playwright `trace.zip` and a copy of the site's JSON logs. Traces and logs are saved
+for passing runs too, including failures detected during server shutdown. The release
+workflow uploads these diagnostics even when a test fails. Open a trace with
+`pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 show-trace <path-to-trace.zip>`.
+Set `AVPF_KEEP_TEST_SITE=1` to keep each
 site's folder in the temp directory, with its database and Umbraco logs. Run a
 single test with `-- --filter-method "*Basic_authentication*"`, and limit the site
 test to some hosting cases with `AVPF_E2E_CASE`, for example `kestrel` or
-`root,iis-external-media-no-websockets`. The sites start from `SiteTemplate`, the
-views a new Umbraco 18.3.1 project ships with. The starter kit embeds third-party
-content, so the suite needs internet access. See
+`root,iis-external-media-no-websockets` or `kestrel-https`. The sites start from
+`SiteTemplate`, the views a new Umbraco 18.3.1 project ships with. Third-party
+embeds and fonts receive fixed offline responses, and jQuery 3.6.0 is vendored
+under `BrowserFixtures` with its MIT license and original integrity hash. Unexpected
+external requests fail the test. After NuGet restore and browser installation, the
+suite does not need internet access. The HTTPS case uses a disposable certificate;
+no certificate is installed in the machine's trust store. See
 [Browser validation](FIXES.md#browser-validation) for the checks and their scope.
 
 Clone into a short path on Windows. Playwright's package contains deeply nested
