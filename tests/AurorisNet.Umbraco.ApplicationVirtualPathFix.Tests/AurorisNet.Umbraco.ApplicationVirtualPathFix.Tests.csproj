@@ -12,7 +12,17 @@
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="Microsoft.Playwright" />
     <PackageReference Include="Umbraco.Cms" />
+    <PackageReference Include="Umbraco.Cms.DevelopmentMode.Backoffice" />
+    <PackageReference Include="Umbraco.TheStarterKit" />
     <ProjectReference Include="../../src/AurorisNet.Umbraco.ApplicationVirtualPathFix/AurorisNet.Umbraco.ApplicationVirtualPathFix.csproj" />
     <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      Files a new Umbraco 18.3.1 site starts with (src/Umbraco.Web.UI/Views in the Umbraco repository,
+      MIT licensed). Each test site gets a copy; this project does not compile them.
+    -->
+    <Content Remove="SiteTemplate/**" />
+    <None Include="SiteTemplate/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

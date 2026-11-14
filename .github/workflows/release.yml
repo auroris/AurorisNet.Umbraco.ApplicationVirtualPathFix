@@ -18,7 +18,8 @@ jobs:
   release:
     name: Test and publish
     runs-on: windows-latest
-    timeout-minutes: 20
+    # The end-to-end suite boots five starter-kit sites in Chromium.
+    timeout-minutes: 45
     permissions:
       contents: write
       id-token: write

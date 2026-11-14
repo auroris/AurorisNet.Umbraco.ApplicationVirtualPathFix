@@ -32,8 +32,16 @@ $revision = 1
 if ($headRevisions.Count -gt 0) {
     # Retrying a release reuses its reserved version, even after another commit has been released.
     $revision = [int] ($headRevisions | Measure-Object -Maximum).Maximum
-} elseif ($revisions.Count -gt 0) {
-    $revision = [int] ($revisions | Measure-Object -Maximum).Maximum + 1
+} else {
+    # A new revision must come from the branch tip. Re-running an old workflow run checks out its
+    # original commit, which would otherwise publish older code under the highest revision.
+    $branchTip = git rev-parse --verify --quiet "refs/remotes/origin/$BranchName"
+    if ($LASTEXITCODE -ne 0 -or $branchTip -cne $Commit) {
+        throw "Commit $Commit is not the tip of $BranchName. Run Release again from the branch to publish its latest commit."
+    }
+    if ($revisions.Count -gt 0) {
+        $revision = [int] ($revisions | Measure-Object -Maximum).Maximum + 1
+    }
 }
 if ($revision -gt 65534) { throw 'The revision exceeds the .NET assembly version limit.' }
 

@@ -21,25 +21,28 @@
 serve its backoffice under an application virtual path. Installing the package
 registers its fixes through Umbraco's composer and middleware pipeline.
 
-- **Keep sign-in inside the application path.** Login, management API calls and
-  OAuth callbacks use the configured prefix.
+- **Keep sign-in inside the application path.** Login, management API calls,
+  OAuth callbacks and password-reset and invitation links use the configured prefix.
 - **Load backoffice and package assets.** Import maps, cache-busted scripts,
   stylesheets and the Umbraco logo resolve under the application path.
-- **Restore an existing session.** Umbraco renews its token when a refresh cookie
-  is present. A fresh browser starts sign-in directly, avoiding the initial
+- **Serve media under the prefix**, including media stored outside `wwwroot` or in
+  a provider such as Azure Blob Storage, with ImageSharp crops and resizes.
+- **Restore an existing session.** Umbraco renews its token when a session may
+  exist. A fresh browser starts sign-in directly, avoiding the initial
   token-refresh errors. This fix also applies to sites hosted at the root.
 
 This branch targets **Umbraco 18.3.1 and .NET 10**. The package requires that exact
 Umbraco version because some fixes modify the served upstream JavaScript.
-See [Fixes and compatibility](docs/FIXES.md) for the affected behavior and
-validation scope.
+See [Fixes and compatibility](docs/FIXES.md) for the affected behavior, hosting
+requirements and validation scope.
 
 ## Quick start
 
-In an Umbraco 18.3.1 website, install the package:
+In an Umbraco 18.3.1 website, add the package. The floating version picks up the
+latest fix revision for Umbraco 18.3.1:
 
-```sh
-dotnet add package AurorisNet.Umbraco.ApplicationVirtualPathFix --version 18.3.1.1
+```xml
+<PackageReference Include="AurorisNet.Umbraco.ApplicationVirtualPathFix" Version="18.3.1.*" />
 ```
 
 Set the site's application path in `appsettings.json`:
@@ -78,7 +81,9 @@ Umbraco browser tests. Build and test commands are in
 [Developing and releasing](docs/DEVELOPING.md).
 
 Package versions on this branch follow `18.3.1.<revision>`. Revision 1 is
-`18.3.1.1`; the release workflow selects the next revision automatically.
+`18.3.1.1`; the release workflow selects the next revision automatically. The
+package's nuget.org page shows [docs/NUGET.md](docs/NUGET.md) rather than this
+README, because nuget.org renders neither HTML nor relative links.
 
 ## License
 

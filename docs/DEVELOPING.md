@@ -15,9 +15,23 @@ pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/
 dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build
 ```
 
-Repeat the browser installation after upgrading Playwright. The tests create
-their own SQLite databases and start Kestrel on free loopback ports. See
+Repeat the browser installation after upgrading Playwright. The tests build
+starter-kit sites with their own SQLite databases and start Kestrel on free
+loopback ports, one site at a time; a full run takes several minutes. When a step
+fails, the test output includes the page's accessibility tree, and screenshots are
+saved under `bin/Debug/net10.0/e2e-artifacts/<case>`, next to a `test-output.log`
+that is written for passing runs too. Set `AVPF_KEEP_TEST_SITE=1` to keep each
+site's folder in the temp directory, with its database and Umbraco logs. Run a
+single test with `-- --filter-method "*Basic_authentication*"`, and limit the site
+test to some hosting cases with `AVPF_E2E_CASE`, for example `kestrel` or
+`root,iis-external-media-no-websockets`. The sites start from `SiteTemplate`, the
+views a new Umbraco 18.3.1 project ships with. The starter kit embeds third-party
+content, so the suite needs internet access. See
 [Browser validation](FIXES.md#browser-validation) for the checks and their scope.
+
+Clone into a short path on Windows. Playwright's package contains deeply nested
+files, and the build fails with `MSB3021` when a path exceeds 260 characters unless
+long paths are enabled.
 
 To build a package locally:
 
@@ -25,8 +39,10 @@ To build a package locally:
 dotnet pack src/AurorisNet.Umbraco.ApplicationVirtualPathFix -c Release -o artifacts/packages
 ```
 
-Local builds use version `18.3.1.1`. The release workflow supplies its selected
-revision as the MSBuild `Version` property when building and packing.
+Local builds use version `18.3.1.0`. Revision 0 is never published, so a local
+package cannot be confused with a release in NuGet's cache. The release workflow
+supplies its selected revision as the MSBuild `Version` property when building and
+packing.
 
 ## Publish a revision
 
@@ -48,13 +64,15 @@ workflow obtains a short-lived API key through `NuGet/login` using OIDC. See
 for the policy fields.
 
 Re-running a tagged commit reuses its reserved version so a partially completed
-publication can finish. Release runs on this branch are serialized to keep
-revision selection consistent. Ordinary pushes update the branch; publishing
-starts when a maintainer runs Release.
+publication can finish. A new revision is only allocated for the branch tip, so
+re-running an older failed run cannot publish older code under a newer version.
+Release runs on this branch are serialized to keep revision selection consistent.
+Ordinary pushes update the branch; publishing starts when a maintainer runs
+Release.
 
 The `main` branch keeps the workflow available in GitHub's Actions interface.
-Selecting `umbraco/18.3.1` runs the workflow with this branch's source, scripts,
-tests and documentation. The
+Selecting `umbraco/18.3.1` runs this branch's own copy of `release.yml`, with its
+source, scripts, tests and documentation, so keep the copies in step. The
 [version-numbering reference](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/main/docs/VERSIONING.md)
 explains the branch and tag conventions across supported Umbraco versions.
 
