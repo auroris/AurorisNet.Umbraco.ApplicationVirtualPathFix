@@ -158,6 +158,24 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
 
         public IFileProvider Files => _app.Environment.WebRootFileProvider;
 
+        public IEnumerable<(string Path, IFileInfo File)> Enumerate(string directory)
+        {
+            foreach (var file in Files.GetDirectoryContents(directory))
+            {
+                var path = directory + "/" + file.Name;
+                if (file.IsDirectory)
+                {
+                    foreach (var child in Enumerate(path)) yield return child;
+                }
+                else if (path.EndsWith(".js", StringComparison.Ordinal) || path.EndsWith(".css", StringComparison.Ordinal))
+                    yield return (path, file);
+            }
+        }
+
+        public string[] ModulePaths() => Enumerate(BackOfficeAssetPatches.AssetsRoot)
+            .Where(asset => BackOfficeAssetPatches.TryGetModule(asset.Path, AssetsPath, out _))
+            .Select(asset => asset.Path).ToArray();
+
         public ValueTask DisposeAsync() => _app.DisposeAsync();
     }
 }

@@ -47,6 +47,17 @@ internal static class UmbracoPathsUnderPathBase
             var request = context.Request;
             var originalPath = request.Path;
             var originalPathBase = request.PathBase;
+            // PathBase matching is case-insensitive, but the backoffice SPA's base URL is not.
+            // Canonicalize browser navigations so its router sees the configured prefix.
+            if (string.Equals(originalPathBase.Value, virtualPath.Value, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(originalPathBase.Value, virtualPath.Value, StringComparison.Ordinal)
+                && originalPath.StartsWithSegments("/umbraco")
+                && (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
+                && request.Headers.Accept.ToString().Contains("text/html", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.Redirect(virtualPath.Add(originalPath).ToUriComponent() + request.QueryString);
+                return;
+            }
             if (!originalPathBase.HasValue || !ComparedWithVirtualPath(originalPath, hashedAssets))
             {
                 await next(context);

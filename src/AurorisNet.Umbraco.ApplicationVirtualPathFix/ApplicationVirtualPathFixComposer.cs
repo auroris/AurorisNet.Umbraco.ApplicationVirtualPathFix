@@ -101,7 +101,7 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
         return (TService)ActivatorUtilities.CreateInstance(provider, descriptor.ImplementationType!);
     }
 
-    private static void WarnOnUmbracoVersionMismatch(IServiceProvider services)
+    internal static void WarnOnUmbracoVersionMismatch(IServiceProvider services)
     {
         var expected = typeof(ApplicationVirtualPathFixComposer).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(attribute => attribute.Key == "UmbracoVersion")?.Value;

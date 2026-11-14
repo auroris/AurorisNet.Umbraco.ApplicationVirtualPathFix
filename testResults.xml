@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="10" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-11-14" time="03:36:23">
+  <environment machine-name="AURORIS-PC" nunit-version="2.5.8.0" user="steph" user-domain="AURORIS-PC" platform="Microsoft Windows 11 Pro|C:\WINDOWS|\Device\Harddisk0\Partition3" clr-version="10.0.14" cwd="D:\repo\UmbracoApplicationVirtualPathFix" os-version="10.0.26300" />
+  <culture-info current-culture="en-US" current-uiculture="en-US" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="8.6605" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="D:\repo\UmbracoApplicationVirtualPathFix\.github\scripts\Get-ReleaseVersion.Tests.ps1" executed="True" result="Success" success="True" time="8.6605" asserts="0" description="D:\repo\UmbracoApplicationVirtualPathFix\.github\scripts\Get-ReleaseVersion.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Release revision selection" executed="True" result="Success" success="True" time="7.5831" asserts="0" description="Release revision selection">
+            <results>
+              <test-case description="starts at revision one when there are no tags" name="Release revision selection.starts at revision one when there are no tags" time="0.9879" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="selects the next numeric revision and ignores unrelated or malformed tags" name="Release revision selection.selects the next numeric revision and ignores unrelated or malformed tags" time="1.2287" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="refuses an untagged stale commit" name="Release revision selection.refuses an untagged stale commit" time="0.9595" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="reuses a tagged revision when retrying after a newer release" name="Release revision selection.reuses a tagged revision when retrying after a newer release" time="0.9621" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a branch that does not match the dependency" name="Release revision selection.rejects a branch that does not match the dependency" time="0.5003" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a checkout different from the requested release commit" name="Release revision selection.rejects a checkout different from the requested release commit" time="0.6932" asserts="0" success="True" result="Success" executed="True" />
+              <test-suite type="ParameterizedTest" name="Release revision selection.rejects malformed props: &lt;Value&gt;" executed="True" result="Success" success="True" time="1.8282" asserts="0" description="rejects malformed props: &lt;Value&gt;">
+                <results>
+                  <test-case description="rejects malformed props: 18.3" name="Release revision selection.rejects malformed props: 18.3" time="0.481" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="rejects malformed props: 18.3.1.2" name="Release revision selection.rejects malformed props: 18.3.1.2" time="0.4522" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="rejects malformed props: 18.03.1" name="Release revision selection.rejects malformed props: 18.03.1" time="0.4471" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="rejects malformed props: invalid" name="Release revision selection.rejects malformed props: invalid" time="0.4479" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>

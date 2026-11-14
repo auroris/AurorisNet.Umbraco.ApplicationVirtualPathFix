@@ -48,6 +48,12 @@ jobs:
           "version=$($release.Version)" >> $env:GITHUB_OUTPUT
           "tag=$($release.Tag)" >> $env:GITHUB_OUTPUT
 
+      - name: Test release version selection
+        run: |
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
+          Invoke-Pester .github/scripts/Get-ReleaseVersion.Tests.ps1 -CI
+
       - name: Build
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}

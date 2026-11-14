@@ -20,35 +20,42 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
     private ITestOutputHelper _log = output;
 
     [Theory]
-    [InlineData("", false, false, true)]               // At the root.
-    [InlineData("/SomeTestPath", false, false, true)]  // Kestrel subdirectory.
-    [InlineData("/SomeTestPath", false, true, true)]   // Kestrel subdirectory, media outside wwwroot.
-    [InlineData("/SomeTestPath", true, true, false)]   // IIS child application without WebSockets, media outside wwwroot.
-    [InlineData("/SomeTestPath", false, false, true, true)] // HTTPS and cross-site secure-cookie restoration.
-    public async Task Starter_kit_site_works_end_to_end(string prefix, bool existingPathBase, bool mediaOutsideWebRoot, bool webSockets, bool https = false)
+    [InlineData("", TestHost.Kestrel, false, true)]
+    [InlineData("/SomeTestPath", TestHost.Kestrel, false, true)]
+    [InlineData("/a/b", TestHost.Kestrel, true, true, false, false)] // Nested path and production asset caching.
+    [InlineData("/SomeTestPath", TestHost.Iis, true, false)]
+    [InlineData("/SomeTestPath", TestHost.Kestrel, false, true, true)]
+    [InlineData("/SomeTestPath", TestHost.ReverseProxy, false, false, true)]
+    [InlineData("", TestHost.ReverseProxy, false, false, true)]
+    public async Task Starter_kit_site_works_end_to_end(string prefix, TestHost host, bool mediaOutsideWebRoot, bool webSockets, bool https = false, bool debug = true)
     {
         var ct = TestContext.Current.CancellationToken;
-        var name = $"{(prefix.Length == 0 ? "root" : existingPathBase ? "iis" : "kestrel")}{(mediaOutsideWebRoot ? "-external-media" : "")}{(webSockets ? "" : "-no-websockets")}";
+        var name = $"{(prefix.Length == 0 ? "root" : host == TestHost.Iis ? "iis" : "kestrel")}{(mediaOutsideWebRoot ? "-external-media" : "")}{(webSockets ? "" : "-no-websockets")}";
+        if (host == TestHost.ReverseProxy) name += "-proxy";
         if (https) name += "-https";
         // Set AVPF_E2E_CASE to case names, such as kestrel or root,kestrel, to run just those hosting cases.
         if (Environment.GetEnvironmentVariable("AVPF_E2E_CASE") is { Length: > 0 } only && !only.Split(',').Contains(name))
             Assert.Skip($"AVPF_E2E_CASE selects {only}.");
         var log = TeeOutput.Create(_log, name);
         _log = log;
-        await using var site = await TestSite.StartAsync(new SiteOptions(prefix, existingPathBase, mediaOutsideWebRoot, webSockets, Https: https), ct, log.DirectoryPath);
+        await using var site = await TestSite.StartAsync(new SiteOptions(prefix, host, mediaOutsideWebRoot, webSockets, Https: https, Debug: debug), ct, log.DirectoryPath);
         await using (var browser = await BrowserSession.StartAsync(site, _log, log.DirectoryPath))
         {
             await browser.StepAsync("OpenAPI documents", () => CheckOpenApiAsync(site, ct));
             await browser.StepAsync("Front end: every page and image", () => CrawlFrontEndAsync(browser.Page, site));
             await browser.StepAsync("Forgotten password email", () => FollowPasswordResetEmailAsync(browser, site, ct));
             await browser.StepAsync("Backoffice sign-in", () => SignInAsync(browser.Page, site));
+            await browser.StepAsync("Patched modules and HTTP caching", () => CheckPatchedAssetsAsync(browser.Page, site, ct));
             await browser.StepAsync("Session restore after reload", () => ReloadAndRestoreSessionAsync(browser.Page, site));
             if (https)
                 await browser.StepAsync("Cross-site session restore", () => RestoreFromExternalLinkAsync(browser, site));
             await browser.StepAsync("Rich text, code editors and themes", () => CheckEditorsAndThemesAsync(browser.Page, site));
+            await browser.StepAsync("Block grid stylesheets", () => CheckBlockGridAsync(browser.Page, site));
             await browser.StepAsync("Invitation email", () => FollowInvitationEmailAsync(browser, site, ct));
             await browser.StepAsync("Create and publish a page", () => CreateAndPublishPageAsync(browser.Page, site, ct));
             await browser.StepAsync("Upload a file and open it", () => UploadMediaAsync(browser.Page, site, ct));
+            await browser.StepAsync("Delivery API", () => CheckDeliveryApiAsync(site, ct));
+            await browser.StepAsync("Sign out", () => SignOutAsync(browser.Page, site));
             await browser.AssertNoErrorsAsync();
         }
 
@@ -214,7 +221,9 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 
     private static async Task SignInAsync(IPage page, TestSite site)
     {
-        var response = await page.GotoAsync(site.Url("/umbraco").ToString());
+        // Exercise the common IIS case where a bookmark uses different prefix casing.
+        var address = new Uri(site.Address, site.Options.Prefix.ToLowerInvariant() + "/umbraco");
+        var response = await page.GotoAsync(address.ToString());
         Assert.True(response?.Ok, $"The backoffice returned HTTP {response?.Status}");
         await page.Locator("#username-input").FillAsync(TestSite.Email);
         await page.Locator("#password-input").FillAsync(TestSite.Password);
@@ -383,7 +392,8 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await Expect(documentTypes.First).ToBeVisibleAsync(new() { Timeout = 30_000 });
         // The starter kit's Content Page needs only a page title.
         var names = await documentTypes.EvaluateAllAsync<string[]>("types => types.map(type => type.name ?? '')");
-        var index = Math.Max(0, Array.FindIndex(names, name => name.StartsWith("Content Page", StringComparison.Ordinal)));
+        var index = Array.FindIndex(names, name => name.StartsWith("Content Page", StringComparison.Ordinal));
+        Assert.True(index >= 0, $"The starter kit's Content Page is missing. Found: {string.Join(", ", names)}");
         _log.WriteLine($"Document types: {string.Join(", ", names)}; using {names.ElementAtOrDefault(index)}");
         await documentTypes.Nth(index).ClickAsync();
         await page.Locator("[data-mark='input:entity-name'] input").FillAsync(pageName);
@@ -434,6 +444,11 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.SaveAndPreview']").ClickAsync());
         try
         {
+            if (!site.Options.WebSockets)
+            {
+                await Expect(preview.Locator("umb-app")).ToBeAttachedAsync();
+                await AssertServerSentEventsAsync(preview);
+            }
             IFrame? frame = null;
             for (var attempt = 0; attempt < 60 && frame is null; attempt++)
             {
@@ -538,6 +553,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         {
             await view.CloseAsync();
         }
+        await CheckRenderedMediaAsync(page, site, key);
     }
 
     private static async Task<string> WaitForFileAsync(string directory, string pattern, TimeSpan timeout, CancellationToken ct)
@@ -593,6 +609,16 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             var context = await browser.NewContextAsync(new() { IgnoreHTTPSErrors = site.Options.Https });
             var session = new BrowserSession(playwright, browser, context, site, output, artifacts);
             await context.Tracing.StartAsync(new() { Screenshots = true, Snapshots = true, Sources = true });
+            await context.AddInitScriptAsync("""
+                window.__testEventSources = [];
+                const NativeEventSource = window.EventSource;
+                window.EventSource = class extends NativeEventSource {
+                  constructor(url, options) {
+                    super(url, options);
+                    this.addEventListener('open', () => window.__testEventSources.push(this.url));
+                  }
+                };
+                """);
             await context.RouteAsync("**/*", async route =>
             {
                 var url = new Uri(route.Request.Url);

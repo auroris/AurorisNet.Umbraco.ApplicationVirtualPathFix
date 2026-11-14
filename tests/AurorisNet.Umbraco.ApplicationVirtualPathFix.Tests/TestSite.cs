@@ -7,6 +7,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Umbraco.Cms.Api.Management.Services.NewsDashboard;
 using Umbraco.Cms.Api.Management.ViewModels.NewsDashboard;
@@ -17,20 +18,26 @@ using Umbraco.Cms.Core.Sync;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
+public enum TestHost { Kestrel, Iis, ReverseProxy }
+
 /// <summary>How a disposable test site is hosted.</summary>
 /// <param name="Prefix">The application virtual path, or "" for a site at the root.</param>
-/// <param name="ExistingPathBase">Model an IIS child application: the path base is already set when the package runs.</param>
+/// <param name="Host">How the prefix and external origin reach the application.</param>
 /// <param name="MediaOutsideWebRoot">Store media in an absolute folder outside wwwroot, as file-system providers such as Azure Blob Storage do.</param>
 /// <param name="WebSockets">False models a host without WebSocket support, so SignalR falls back to Server-Sent Events.</param>
 /// <param name="BasicAuth">Protect the front end with Umbraco's basic authentication and its login page.</param>
 /// <param name="Https">Use a disposable self-signed certificate to exercise secure cookies.</param>
 internal sealed record SiteOptions(
     string Prefix,
-    bool ExistingPathBase = false,
+    TestHost Host = TestHost.Kestrel,
     bool MediaOutsideWebRoot = false,
     bool WebSockets = true,
     bool BasicAuth = false,
-    bool Https = false);
+    bool Https = false,
+    bool Debug = true)
+{
+    public bool ExistingPathBase => Host == TestHost.Iis;
+}
 
 /// <summary>
 /// A disposable site built like <c>dotnet new umbraco</c> with the starter kit: SQLite, Kestrel,
@@ -61,6 +68,8 @@ internal sealed class TestSite : IAsyncDisposable
     public string Root { get; }
 
     public Uri Address { get; }
+
+    public IServiceProvider Services => _app.Services;
 
     public string MailDirectory => Path.Combine(Root, "mail");
 
@@ -109,6 +118,22 @@ internal sealed class TestSite : IAsyncDisposable
             try
             {
                 PublishImportedContent(app);
+                // Exercise normal Razor media URL and signed crop generation from the real picker
+                // value, alongside the starter kit's background image.
+                await File.AppendAllTextAsync(Path.Combine(root, "Views", "Home.cshtml"), """
+
+                    @inject Umbraco.Cms.Core.Media.IImageUrlGenerator TestImageUrlGenerator
+                    @inject Umbraco.Cms.Core.Models.PublishedContent.IPublishedValueFallback TestValueFallback
+                    @inject Umbraco.Cms.Core.Routing.IPublishedUrlProvider TestUrlProvider
+                    @if (Model.HeroBackgroundImage is { } testImage)
+                    {
+                        <img id="test-media-original" src="@testImage.Url()" alt="Test original" />
+                        <img id="test-media-crop" src="@testImage.GetCropUrl(TestImageUrlGenerator, TestValueFallback, TestUrlProvider, width: 100, height: 60)" alt="Test crop" />
+                    }
+                    """, cancellationToken);
+                // The parameterless helper caches its generator in a static readonly property.
+                // Pass this site's services to the same underlying helper so a previous test's
+                // HMAC key cannot leak into the next disposable site in this process.
                 var address = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
                 return new TestSite(app, root, options, address, startedAt) { _artifacts = artifacts };
             }
@@ -159,7 +184,9 @@ internal sealed class TestSite : IAsyncDisposable
             ["Umbraco:CMS:WebRouting:ApplicationUrlDetection"] = "FirstRequest",
             ["Umbraco:CMS:Hosting:ApplicationVirtualPath"] = options.Prefix,
             // As in the template's Development settings; serves backoffice modules with no-cache.
-            ["Umbraco:CMS:Hosting:Debug"] = "true",
+            ["Umbraco:CMS:Hosting:Debug"] = options.Debug.ToString(),
+            ["Umbraco:CMS:DeliveryApi:Enabled"] = "true",
+            ["Umbraco:CMS:DeliveryApi:PublicAccess"] = "true",
             ["Umbraco:CMS:TypeFinder:AdditionalAssemblyExclusionEntries:0"] = "xunit.",
             ["Umbraco:CMS:Unattended:InstallUnattended"] = "true",
             ["Umbraco:CMS:Unattended:UpgradeUnattended"] = "true",
@@ -207,7 +234,7 @@ internal sealed class TestSite : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.Configuration.AddInMemoryCollection(settings);
         // Standard Umbraco startup: no AppHost or explicit package registration.
-        builder.CreateUmbracoBuilder().AddBackOffice().AddWebsite().AddComposers().Build();
+        builder.CreateUmbracoBuilder().AddBackOffice().AddWebsite().AddDeliveryApi().AddComposers().Build();
         builder.Services.Replace(ServiceDescriptor.Singleton<IServerRoleAccessor, SingleServerRoleAccessor>());
         // Keep the real authenticated dashboard endpoint and UI, with deterministic news instead of an external feed.
         builder.Services.Replace(ServiceDescriptor.Singleton<INewsDashboardService, TestNews>());
@@ -381,6 +408,29 @@ internal sealed class TestSite : IAsyncDisposable
             // Also exercise the PathBase supplied by an IIS child application, without needing IIS.
             if (options.ExistingPathBase)
                 app.UsePathBase(options.Prefix);
+            if (options.Host == TestHost.ReverseProxy)
+            {
+                app.Use(async (context, nextRequest) =>
+                {
+                    // Model a trusted TLS-terminating proxy forwarding to an HTTP backend with
+                    // a different Host and the public prefix stripped from the request target.
+                    context.Request.Headers["X-Forwarded-Host"] = context.Request.Host.Value;
+                    context.Request.Headers["X-Forwarded-Proto"] = context.Request.Scheme;
+                    context.Request.Headers["X-Forwarded-Prefix"] = context.Request.Path.Value![..options.Prefix.Length];
+                    context.Request.Host = new HostString("backend.internal", 8080);
+                    context.Request.Scheme = "http";
+                    if (options.Prefix.Length > 0)
+                    {
+                        Assert.True(context.Request.Path.StartsWithSegments(options.Prefix, out var rest));
+                        context.Request.Path = rest;
+                    }
+                    await nextRequest(context);
+                });
+                app.UseForwardedHeaders(new ForwardedHeadersOptions
+                {
+                    ForwardedHeaders = ForwardedHeaders.XForwardedHost | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedPrefix,
+                });
+            }
             next(app);
         };
     }
