@@ -6,12 +6,14 @@
     <StaticWebAssetBasePath>/</StaticWebAssetBasePath>
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <PackageId>AurorisNet.Umbraco.ApplicationVirtualPathFix</PackageId>
+    <Title>Umbraco Application Virtual Path Fix</Title>
     <Version>$(UmbracoVersion).1</Version>
     <Authors>Auroris</Authors>
-    <Description>Fixes application virtual path hosting, backoffice assets, login and initial token refresh in Umbraco $(UmbracoVersion). Registers automatically without UmbracoAppHost.</Description>
-    <PackageTags>umbraco;virtual-path;backoffice</PackageTags>
+    <Description>Fixes application virtual path hosting, backoffice assets, login and initial token refresh in Umbraco $(UmbracoVersion). Registers automatically through Umbraco startup.</Description>
+    <PackageTags>umbraco;umbraco-marketplace;virtual-path;backoffice</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</PackageProjectUrl>
     <RepositoryUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>

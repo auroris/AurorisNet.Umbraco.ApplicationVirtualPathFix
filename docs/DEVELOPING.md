@@ -57,3 +57,8 @@ Selecting `umbraco/18.3.1` runs the workflow with this branch's source, scripts,
 tests and documentation. The
 [version-numbering reference](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/main/docs/VERSIONING.md)
 explains the branch and tag conventions across supported Umbraco versions.
+
+The package includes the `umbraco-marketplace` tag for Marketplace discovery.
+Shared listing metadata lives on `main`. Push changes to that metadata before
+releasing this branch, then validate the published package using the
+[Marketplace listing instructions](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/main/docs/VERSIONING.md#marketplace-listing).
