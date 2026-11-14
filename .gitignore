@@ -1,0 +1,10 @@
+[Bb]in/
+[Oo]bj/
+.vs/
+.idea/
+*.user
+*.suo
+artifacts/
+TestResults/
+appsettings-schema*.json
+umbraco-package-schema.json

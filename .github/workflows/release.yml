@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  release:
+    name: Test and publish
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      PACKAGE_PROJECT: src/AurorisNet.Umbraco.ApplicationVirtualPathFix/AurorisNet.Umbraco.ApplicationVirtualPathFix.csproj
+      TEST_PROJECT: tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests.csproj
+      ContinuousIntegrationBuild: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Choose the next revision for this Umbraco version
+        id: version
+        env:
+          RELEASE_BRANCH: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          $release = & .github/scripts/Get-ReleaseVersion.ps1 -BranchName $env:RELEASE_BRANCH -Commit $env:RELEASE_COMMIT
+          "version=$($release.Version)" >> $env:GITHUB_OUTPUT
+          "tag=$($release.Tag)" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: dotnet build "$env:TEST_PROJECT" -c Release -p:Version=$env:RELEASE_VERSION
+
+      - name: Install Chromium
+        run: ./tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Release/net10.0/playwright.ps1 install chromium
+
+      - name: Test the backoffice on Kestrel
+        run: dotnet test --project "$env:TEST_PROJECT" -c Release --no-build
+
+      - name: Pack
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: dotnet pack "$env:PACKAGE_PROJECT" -c Release --no-build -p:Version=$env:RELEASE_VERSION -o artifacts/packages
+
+      - name: Reserve the release tag before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          $existing = git tag --list "$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check release tags.' }
+          if (!$existing) {
+            gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$env:RELEASE_TAG" -f "sha=$env:RELEASE_COMMIT"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not reserve the release tag.' }
+          }
+
+      - name: Log in to NuGet with trusted publishing
+        id: nuget-login
+        uses: NuGet/login@ebc737b6fc418a6ca0073cf116ec8dc156d8b81e # v1
+        with:
+          user: AurorisNet
+
+      - name: Publish to NuGet
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: >-
+          dotnet nuget push "artifacts/packages/AurorisNet.Umbraco.ApplicationVirtualPathFix.$env:RELEASE_VERSION.nupkg"
+          --source https://api.nuget.org/v3/index.json --api-key "$env:NUGET_API_KEY" --skip-duplicate
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $package = "artifacts/packages/AurorisNet.Umbraco.ApplicationVirtualPathFix.$env:RELEASE_VERSION.nupkg"
+          gh release view "$env:RELEASE_TAG" --json id 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "$env:RELEASE_TAG" "$package" --clobber
+          } else {
+            gh release create "$env:RELEASE_TAG" "$package" --verify-tag --title "$env:RELEASE_VERSION" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish the GitHub release.' }
