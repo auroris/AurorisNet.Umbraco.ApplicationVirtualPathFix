@@ -15,6 +15,7 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 | The slim login script uses root URLs for login, two-factor verification and its shared API client. | The served script uses the application prefix for those requests, including public package manifests and password resets. |
 | Password-reset and invitation emails link to `/umbraco/login` at the host root. | The emailed links include the application path. |
 | Media stored outside `wwwroot` (an absolute `UmbracoMediaPhysicalRootPath`, or a provider such as Azure Blob Storage) is mounted only at the prefixed path, which requests under a path base never match. | Media is served under the prefix from any media file system, and ImageSharp crops and resizes apply to it. |
+| The thumbnail URL assembler adds the prefix again to signed media URLs, invalidating their image-processing signatures. | Already-prefixed media paths retain one prefix and their original signature. |
 | Basic authentication, the OpenAPI documents and the management API contract compare `Request.Path` with a path that includes the virtual path. With `RedirectToLoginPage`, every visitor is redirected in a loop. | Those requests see the path shape Umbraco expects, so the basic-authentication login page and the OpenAPI documents work under the prefix. |
 | The logo in the header's system-information popover uses a root-absolute URL. | The logo resolves relative to the served module, retaining its prefix and asset hash. |
 | The block grid editor loads its default layout stylesheet from `/umbraco/backoffice/css/...`, and resolves a custom layout stylesheet's site path against the host root. | Both stylesheets load under the prefix. |
@@ -105,19 +106,26 @@ The five starter-kit cases each:
 - edit rich text, ask the JSON worker to validate invalid code, and load dark and high-contrast themes;
 - create a page, publish it and open it on the front end;
 - preview unpublished changes, save a second draft, and verify that the open preview updates while the public page remains unchanged;
-- upload an image, check every link to it in the backoffice, then open it and a resized version.
+- upload an image, check every link to it in the backoffice, then open it and a signed resized version returned by the imaging API.
 
 The basic-authentication case checks a two-factor redirect, retries after an invalid
 password, signs in and checks that the home page loads. The IIS-style case
 also uses a content slug matching the application prefix. Focused middleware tests
 cover response-compression ordering, conditional responses, precompressed content
-and session hints.
+and session hints. Each site has image signing enabled with a fresh test key.
 
 Any browser console error, uncaught JavaScript exception, failed request or HTTP
 error fails the test, and so does any error the site logs or any warning from the
 package. The starter kit's external dependencies receive deterministic local
 responses; unexpected external requests fail. Browser routing disables its HTTP
 cache, so conditional-response behavior is tested separately with an HTTP client.
-These checks run over HTTP and HTTPS on Kestrel; live IIS still requires deployment
-validation. See [Developing and releasing](DEVELOPING.md) to run the suite and view
-the saved traces, screenshots and server logs.
+The automated suite runs over HTTP and HTTPS on Kestrel. On 14 November 2026,
+the browser checks also passed against a published IIS child application on
+Windows Server 2022 and .NET 10.0.14: `/SomeTestPath`, in-process hosting (`w3wp`),
+external media storage, image signing enabled and WebSockets disabled. This included
+the repeated content slug, updating draft preview, signed image resizing and a
+separate basic-authentication run. That was a deployment check; the automated
+IIS-style case still uses Kestrel.
+
+See [Developing and releasing](DEVELOPING.md) to run the suite and view the saved
+traces, screenshots and server logs.

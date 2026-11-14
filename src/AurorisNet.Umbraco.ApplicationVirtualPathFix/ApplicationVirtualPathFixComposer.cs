@@ -56,9 +56,9 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
             },
             postPipeline: app => app.UseMediaUnderPathBase())));
         services.Replace(ServiceDescriptor.Singleton<IBackOfficePathGenerator, BackOfficePaths>());
-        Decorate<IUrlAssembler>(services, required: true,
-            (provider, inner) => new MediaUrlAssembler(inner, provider.GetRequiredService<IHostingEnvironment>(),
-                provider.GetRequiredService<IOptions<GlobalSettings>>().Value));
+        // ManagementApiComposer registers the default assembler again. Finalize this decorator
+        // in UmbracoBuilder.Build(), after composers, without depending on the optional API package.
+        builder.WithCollectionBuilder<MediaUrlAssemblerRegistration>();
         Decorate<IPackageManifestService>(services, required: true,
             (provider, inner) => new VirtualPathImportMapService(inner, provider.GetRequiredService<IBackOfficePathGenerator>()));
         // Registered by the management API, which a site can leave out.
@@ -66,6 +66,14 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
             (provider, inner) => new VirtualPathInviteUriProvider(inner, provider.GetRequiredService<IHostingEnvironment>()));
         Decorate<IForgotPasswordUriProvider>(services, required: false,
             (provider, inner) => new VirtualPathForgotPasswordUriProvider(inner, provider.GetRequiredService<IHostingEnvironment>()));
+    }
+
+    private sealed class MediaUrlAssemblerRegistration : ICollectionBuilder
+    {
+        public void RegisterWith(IServiceCollection services)
+            => Decorate<IUrlAssembler>(services, required: true,
+                (provider, inner) => new MediaUrlAssembler(inner, provider.GetRequiredService<IHostingEnvironment>(),
+                    provider.GetRequiredService<IOptions<GlobalSettings>>().Value));
     }
 
     private static void Decorate<TService>(IServiceCollection services, bool required, Func<IServiceProvider, TService, TService> decorate)
