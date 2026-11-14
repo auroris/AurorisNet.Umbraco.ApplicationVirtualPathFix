@@ -1,21 +1,48 @@
-# AurorisNet.Umbraco.ApplicationVirtualPathFix
+<h1 align="center">Umbraco Application Virtual Path Fix</h1>
 
-Fixes Umbraco 18.3.1 backoffice hosting under an application virtual path,
-including login, management API URLs, import maps, assets and the header logo.
-It also avoids the initial token-refresh errors on a fresh browser session,
-both at the root and under a virtual path. Umbraco still validates and renews
-tokens; the package exposes only the presence of its HTTP-only refresh cookie.
+<p align="center">
+  Backoffice fixes for Umbraco 18.3.1 sites hosted under a subdirectory.<br>
+  Keep login, assets, dashboard requests and session renewal under paths such as <code>/SomeTestPath/umbraco</code>.
+</p>
 
-This is an independent MIT-licensed package. It depends only on Umbraco and
-ASP.NET Core; UmbracoAppHost, AppBlocks and IdentityServer are not required.
+<p align="center">
+  <a href="LICENSE"><img alt="MIT license" src="docs/images/badge-license.svg"></a>
+  <img alt=".NET 10" src="docs/images/badge-dotnet-10.svg">
+</p>
 
-## Installation
+<p align="center">
+  <a href="https://www.nuget.org/packages/AurorisNet.Umbraco.ApplicationVirtualPathFix/18.3.1.1">NuGet package</a> ·
+  <a href="https://github.com/auroris/UmbracoApplicationVirtualPathFix/tree/main">All supported versions</a>
+</p>
+
+## What it does
+
+`AurorisNet.Umbraco.ApplicationVirtualPathFix` lets a standard Umbraco 18.3.1 site
+serve its backoffice under an application virtual path. Installing the package
+registers its fixes through Umbraco's composer and middleware pipeline.
+
+- **Keep sign-in inside the application path.** Login, management API calls and
+  OAuth callbacks use the configured prefix.
+- **Load backoffice and package assets.** Import maps, cache-busted scripts,
+  stylesheets and the Umbraco logo resolve under the application path.
+- **Restore an existing session.** Umbraco renews its token when a refresh cookie
+  is present. A fresh browser starts sign-in directly, avoiding the initial
+  token-refresh errors. This fix also applies to sites hosted at the root.
+
+This branch targets **Umbraco 18.3.1 and .NET 10**. The package requires that exact
+Umbraco version because some fixes modify the served upstream JavaScript.
+See [Fixes and compatibility](docs/FIXES.md) for the affected behavior and
+validation scope.
+
+## Quick start
+
+In an Umbraco 18.3.1 website, install the package:
 
 ```sh
 dotnet add package AurorisNet.Umbraco.ApplicationVirtualPathFix --version 18.3.1.1
 ```
 
-Use Umbraco's existing setting in `appsettings.json`:
+Set the site's application path in `appsettings.json`:
 
 ```json
 {
@@ -29,68 +56,30 @@ Use Umbraco's existing setting in `appsettings.json`:
 }
 ```
 
-Then open `/SomeTestPath/umbraco`. The composer and pipeline filter register
-automatically with the standard Umbraco `.AddComposers()` startup; no additional
-`Program.cs` calls or package settings are needed. For root hosting, omit the
-setting. Kestrel uses `UsePathBase`; an existing IIS child-application path base
-is preserved. This package does not configure IIS bindings or reverse proxies.
+Start the website and open `/SomeTestPath/umbraco`. Standard Umbraco startup with
+`.AddComposers()` loads the package automatically. Kestrel applies the prefix as
+`Request.PathBase`; an existing path base supplied by IIS is preserved. For an
+IIS child application, match the setting to its application path. Sites hosted
+at the root can leave `ApplicationVirtualPath` unset.
 
-## Compatibility
+## Documentation
 
-This branch targets .NET 10 and **Umbraco 18.3.1 only**. The exact NuGet
-dependency is intentional: some fixes patch the served upstream JavaScript
-bundle. Verify the browser tests and adjust those patches before supporting a
-different Umbraco version. Patched asset URLs change with each package build,
-and backoffice HTML is not cached because cookie presence varies per request.
+| Guide | Read it for |
+|---|---|
+| [Fixes and compatibility](docs/FIXES.md) | The Umbraco 18.3.1 behavior each fix changes, hosting requirements and browser-test coverage. |
+| [Developing and releasing](docs/DEVELOPING.md) | Building this branch, running Playwright, packing and publishing a revision for Umbraco 18.3.1. |
+| [Package version numbering](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/main/docs/VERSIONING.md) | How Umbraco versions, package revisions, branches and release tags relate. |
 
-The package does not rewrite URLs in arbitrary third-party plugins. Those
-plugins must respect the configured virtual path themselves.
+## Developing
 
-## Building and testing from this repository
+Check out `umbraco/18.3.1` and open `UmbracoApplicationVirtualPathFix.slnx` with the
+.NET 10 SDK installed. The solution contains the package and its standalone
+Umbraco browser tests. Build and test commands are in
+[Developing and releasing](docs/DEVELOPING.md).
 
-Open `UmbracoApplicationVirtualPathFix.slnx`, or run the commands below from the
-repository root with the .NET 10 SDK. No sibling repositories are needed.
+Package versions on this branch follow `18.3.1.<revision>`. Revision 1 is
+`18.3.1.1`; the release workflow selects the next revision automatically.
 
-```powershell
-dotnet build tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests
-pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
-dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests
-dotnet pack src/AurorisNet.Umbraco.ApplicationVirtualPathFix -c Release -o artifacts/packages
-```
+## License
 
-The standalone tests use plain Umbraco with SQLite and Kestrel, exercise login
-and session renewal at the root and under a subdirectory, and fail on browser
-console errors or uncaught JavaScript exceptions. AppHost retains its separate
-browser test, including its welcome dashboard's report and pagination.
-
-## Releases
-
-Each `umbraco/<version>` branch supports one exact Umbraco version, configured
-once in `Directory.Build.props`. Package versions add a local revision:
-`18.3.1.1`, `18.3.1.2`, and so on. Revisions start at 1 for each Umbraco version.
-The library dependency and the browser tests use that same configured version.
-
-After publishing the repository to GitHub, keep `release.yml` on the default
-branch so GitHub displays **Actions → Release → Run workflow**. Select the
-matching version branch, initially `umbraco/18.3.1`. The workflow:
-
-1. Chooses the next revision from that Umbraco version's release tags.
-2. Builds and runs the Playwright tests before packing the NuGet package.
-3. Reserves its `v18.3.1.1`-style tag at the tested commit.
-4. Publishes to NuGet as `AurorisNet` through OIDC trusted publishing, then creates
-   a GitHub release with the package attached.
-
-Re-running a tagged commit reuses its version, allowing a failed
-publication to finish. The tag is reserved before publishing so a different
-commit cannot reuse that package version. Releases on the same branch run one
-at a time. Nothing publishes automatically on a normal push.
-
-The NuGet trusted publishing policy must name the GitHub repository and the
-workflow filename **`release.yml`**, with no environment. The workflow uses
-`NuGet/login` to obtain a short-lived API key; no stored NuGet API key is needed.
-See [NuGet trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing).
-
-To support another Umbraco version, create its matching branch, update
-`UmbracoVersion`, check the upstream patches and run the browser tests before
-releasing. Local builds default to `<UmbracoVersion>.1`; release builds supply
-the automatically selected revision without committing version bumps.
+[MIT](LICENSE)
