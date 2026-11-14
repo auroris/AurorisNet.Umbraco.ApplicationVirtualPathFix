@@ -26,9 +26,10 @@ available source branches and their installation instructions.
 
 ## Branches and documentation
 
-The `main` branch provides the project overview, shared documentation and the
-Release workflow. Source, tests, build settings and implementation documentation
-live on `umbraco/<version>` branches, beginning with
+The `main` branch provides the project overview, shared documentation,
+Marketplace listing metadata and the Release workflow. Source, tests, build
+settings and implementation documentation live on `umbraco/<version>` branches,
+beginning with
 [`umbraco/18.3.1`](https://github.com/auroris/UmbracoApplicationVirtualPathFix/tree/umbraco/18.3.1).
 
 Each version branch sets `UmbracoVersion` in `Directory.Build.props`. The package
@@ -61,3 +62,19 @@ abandoned; preserve that tag so another commit cannot reuse the version.
 Follow the version branch's development guide for build commands and release
 setup. The [Umbraco 18.3.1 guide](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/umbraco/18.3.1/docs/DEVELOPING.md)
 covers the first supported version.
+
+## Marketplace listing
+
+The package's NuGet metadata includes the `umbraco-marketplace` tag and the
+repository's root URL as `PackageProjectUrl`. Umbraco Marketplace uses that URL
+to find [`umbraco-marketplace.json`](../umbraco-marketplace.json) on `main`.
+The JSON supplies the Developer Tools category, free license classification,
+documentation link and issue tracker. The title, description and README come
+from the NuGet package; compatibility comes from its Umbraco dependency.
+
+Push listing metadata changes to `main` before publishing a package revision.
+Changes to the NuGet tag, title or project URL require a new package release.
+After publishing, use the [Marketplace validation tools](https://marketplace.umbraco.com/validate)
+with package ID `AurorisNet.Umbraco.ApplicationVirtualPathFix` to check the
+published listing inputs. See Umbraco's [listing guide](https://docs.umbraco.com/umbraco-dxp/marketplace/listing-your-package)
+for synchronization and metadata requirements.

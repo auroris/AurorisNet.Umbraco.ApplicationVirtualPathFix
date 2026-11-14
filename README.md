@@ -37,8 +37,8 @@ JavaScript served by that version. Choose the package that matches the site.
 
 Find the source code, tests and implementation documentation on the matching
 `umbraco/<version>` branch. Each branch's README and documentation describe that
-Umbraco version. The `main` branch contains this overview, shared documentation
-and the Release workflow.
+Umbraco version. The `main` branch contains this overview, shared documentation,
+Marketplace listing metadata and the Release workflow.
 
 | Umbraco | Runtime | Source | Version guide | First package release |
 |---|---|---|---|---|
