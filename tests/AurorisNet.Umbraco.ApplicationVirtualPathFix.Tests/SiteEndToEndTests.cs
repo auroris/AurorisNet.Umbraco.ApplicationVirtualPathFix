@@ -11,8 +11,8 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
 /// <summary>
 /// End-to-end acceptance test: a new Umbraco site with the starter kit, driven through Chromium.
-/// Every browser console error, uncaught exception, failed request or HTTP error fails the run, and
-/// so does any error the site logs.
+/// Browser console errors, uncaught exceptions, failed requests and HTTP errors fail the run,
+/// apart from the documented SSE shutdown 401 after sign-out. Server errors also fail the run.
 /// </summary>
 public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 {
@@ -447,7 +447,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             if (!site.Options.WebSockets)
             {
                 await Expect(preview.Locator("umb-app")).ToBeAttachedAsync();
-                await AssertServerSentEventsAsync(preview);
+                await AssertServerSentEventsAsync(preview, "PreviewHub");
             }
             IFrame? frame = null;
             for (var attempt = 0; attempt < 60 && frame is null; attempt++)
@@ -646,7 +646,9 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             // Context-wide, so every page, popup and new tab is checked.
             context.Console += (_, message) =>
             {
-                if (message.Type == "error")
+                if (message.Type == "error"
+                    && !(session.IsSigningOutHub(message.Location)
+                        && message.Text.StartsWith("Failed to load resource: the server responded with a status of 401", StringComparison.Ordinal)))
                     session.Errors.Enqueue($"[{session._step}] Console: {message.Text} ({message.Location})");
             };
             context.WebError += (_, error) => session.Errors.Enqueue($"[{session._step}] JavaScript: {error.Error}");
@@ -658,6 +660,13 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             };
             context.Response += (_, response) =>
             {
+                // Umbraco revokes the session before SignalR sends its SSE close message. The
+                // resulting POST is rejected even on a root site; allow only that shutdown 401.
+                if (response.Status == 401 && response.Request.Method == "POST" && session.IsSigningOutHub(response.Url))
+                {
+                    output.WriteLine("Expected 401 for the server-event hub's SSE close message after sign-out.");
+                    return;
+                }
                 if (response.Status >= 400)
                     session.Errors.Enqueue($"[{session._step}] HTTP {response.Status}: {response.Request.Method} {response.Url}");
             };
@@ -672,6 +681,11 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         }
 
         public Task<IPage> NewPageAsync() => Context.NewPageAsync();
+
+        private bool IsSigningOutHub(string url)
+            => _step == "Sign out" && !_site.Options.WebSockets
+                && Uri.TryCreate(url, UriKind.Absolute, out var address)
+                && address.GetLeftPart(UriPartial.Path) == _site.Url("/umbraco/serverEventHub").ToString();
 
         public async Task StepAsync(string name, Func<Task> step)
         {

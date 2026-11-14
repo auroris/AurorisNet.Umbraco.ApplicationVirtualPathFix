@@ -47,6 +47,37 @@ Bundle hash changes alone need no patch edits; the definitions in
 `BackOfficeAssetPatches.cs` use `-????????` for hashed filenames. The package's
 exact version dependency still identifies the release that has been validated.
 
+`AssetCoverageTests` independently scans the restored JavaScript and CSS for
+root-absolute asset references and reviews server-URL consumers and concatenations.
+New or renamed files fail the scan unless a patch handles them or an explicit
+exception explains the reference. These are conservative source checks, not a
+JavaScript parser; inspect each new match when upgrading Umbraco.
+
+The browser cases also import every registered JavaScript module and request real
+static files with `If-None-Match`. `kestrel-external-media` uses `/a/b` with
+`Hosting:Debug=false`. The proxy cases are `kestrel-no-websockets-proxy-https` and
+`root-no-websockets-proxy-https`: the fixture changes the incoming scheme and host,
+strips the prefix, then passes the original values through `UseForwardedHeaders`.
+They model proxy input within Kestrel; they do not start a separate proxy server.
+
+The fixture adds two images to the starter kit's home template to exercise the
+media picker's published value through `.Url()` and signed `GetCropUrl()` output.
+It supplies the crop helper's services explicitly because Umbraco's convenience
+overload caches the first site's services in static readonly properties, while
+this suite boots several independent sites in one process.
+
+Run the release-script checks with Pester 5.7.1 (also run by the release workflow):
+
+```powershell
+Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+Import-Module Pester -RequiredVersion 5.7.1
+Invoke-Pester .github/scripts/Get-ReleaseVersion.Tests.ps1 -CI
+```
+
+These tests create disposable Git repositories and cover initial and subsequent
+revisions, tagged retries, stale commits, branch/checkout mismatches and malformed
+version properties. They do not tag or publish this repository.
+
 Clone into a short path on Windows. Playwright's package contains deeply nested
 files, and the build fails with `MSB3021` when a path exceeds 260 characters unless
 long paths are enabled.

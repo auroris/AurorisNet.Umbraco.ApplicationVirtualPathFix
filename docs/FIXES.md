@@ -12,6 +12,7 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 | The backoffice asset rewrite expects the virtual path in `Request.Path`, after the host has moved it into `Request.PathBase`. | Cache-busted asset requests reach Umbraco's script and stylesheet handlers. |
 | Import maps contain root-absolute core and package URLs. | Root-absolute imports and scopes carry the application prefix, and Umbraco can add its asset hash. |
 | The backoffice app builds API and OAuth URLs from the origin and `/umbraco`. | Under a virtual path the served app receives `server-url` and `backoffice-path` values that include the configured path. OAuth callbacks are registered with that prefix. Sites at the root keep Umbraco's defaults. |
+| A backoffice bookmark uses different casing for the application prefix, which the server accepts but the SPA router does not. | Backoffice HTML navigations redirect to the configured prefix casing, retaining the query string. |
 | The slim login script uses root URLs for login, two-factor verification and its shared API client. | The served script uses the application prefix for those requests, including public package manifests and password resets. |
 | Password-reset and invitation emails link to `/umbraco/login` at the host root. | The emailed links include the application path. |
 | Media stored outside `wwwroot` (an absolute `UmbracoMediaPhysicalRootPath`, or a provider such as Azure Blob Storage) is mounted only at the prefixed path, which requests under a path base never match. | Media is served under the prefix from any media file system, and ImageSharp crops and resizes apply to it. |
@@ -100,34 +101,46 @@ each site through Chromium:
 |---|---|
 | Site root | Open `/` and `/umbraco`. |
 | Kestrel subdirectory | Open `/SomeTestPath/...`; the fixture returns 404 for requests outside `/SomeTestPath`. |
-| Kestrel subdirectory, external media | As above, with media stored in a folder outside `wwwroot`. |
+| Kestrel nested subdirectory, external media | Open `/a/b/...`, with media outside `wwwroot` and `Hosting:Debug=false` to exercise asset caching. |
 | Kestrel HTTPS subdirectory | A temporary certificate exercises secure cookies and cross-site session restoration. |
 | IIS child application | The fixture sets the path base before the package runs and removes WebSocket support, as IIS without the WebSocket Protocol feature does, with external media. |
+| Reverse proxy, subdirectory and site root | The fixture strips the prefix and rewrites the incoming host and scheme, then applies `X-Forwarded-Prefix`, `X-Forwarded-Host` and `X-Forwarded-Proto` through `UseForwardedHeaders`. Both cases use HTTPS and disable WebSockets. |
 | Basic authentication | Kestrel subdirectory with the basic-authentication login page enabled. |
 
-The five starter-kit cases each:
+The seven starter-kit cases each:
 
 - request the OpenAPI documents;
 - visit every front-end page reachable from the home page and check that each image loads;
 - request a password reset and follow the emailed link to the new-password form;
 - sign in to the backoffice and check the dashboard and the header logo;
+- open the backoffice using a differently cased prefix, import every patched JavaScript module, and check real static-file 304 responses;
 - reload and check that the session is restored through a token refresh;
 - invite an editor and follow the emailed link to the password form;
 - edit rich text, ask the JSON worker to validate invalid code, open the editor's Find widget and check its icon font, and load dark and high-contrast themes;
+- open a block grid with its default stylesheet, persist a custom stylesheet on its data type, and check both stylesheet URLs and the setting's default-stylesheet link;
 - create a page, publish it and open it on the front end;
 - preview unpublished changes, save a second draft, and verify that the open preview updates while the public page remains unchanged;
-- upload an image, check every link to it in the backoffice, then open it and a signed resized version returned by the imaging API.
+- upload an image, check every link to it in the backoffice, then open it and a signed resized version returned by the imaging API;
+- select that image through the home page's media picker, publish it, and verify the rendered original and signed crop;
+- check the Delivery API's route and media URLs;
+- sign out, verify the prefixed logout redirect, and reload to check the session stays signed out.
 
 The basic-authentication case checks a two-factor redirect, retries after an invalid
 password, signs in and checks that the home page loads. The IIS-style case
 also uses a content slug matching the application prefix. Focused middleware tests
 cover response-compression ordering, conditional responses, precompressed content
-and session hints. Each site has image signing enabled with a fresh test key.
+and session hints, plus startup version warnings and reporting each missing patch
+only once. The cases without WebSockets observe an actual EventSource open event
+for both the backoffice server-events hub and the preview hub. Each site has image
+signing enabled with a fresh test key.
 
-Any browser console error, uncaught JavaScript exception, failed request or HTTP
-error fails the test, and so does any error the site logs or any warning from the
-package. The starter kit's external dependencies receive deterministic local
-responses; unexpected external requests fail. Browser routing disables its HTTP
+Browser console errors, uncaught JavaScript exceptions, failed requests and HTTP
+errors fail the test, as do server errors and package warnings. One expected response
+is recorded separately: without WebSockets, Umbraco revokes the session before
+SignalR sends its SSE close message, causing a 401 on the server-event hub's POST
+during sign-out. This also occurs on a root site. The starter kit's external
+dependencies receive deterministic local responses; unexpected external requests
+fail. Browser routing disables its HTTP
 cache, so conditional-response behavior is tested separately with an HTTP client.
 The automated suite runs over HTTP and HTTPS on Kestrel. On 14 November 2026,
 the browser checks also passed against a published IIS child application on

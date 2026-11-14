@@ -72,6 +72,8 @@ public sealed partial class SiteEndToEndTests
             }
             """);
         Assert.Equal(site.Address.GetLeftPart(UriPartial.Authority) + site.Options.Prefix, serverUrl);
+        if (!site.Options.WebSockets)
+            await AssertServerSentEventsAsync(page, "serverEventHub");
         await using var assets = new AssetPatchTests.Assets();
         var root = site.Services.GetRequiredService<IBackOfficePathGenerator>().BackOfficeAssetsPath;
         var paths = assets.ModulePaths().Select(path => root + path[BackOfficeAssetPatches.AssetsRoot.Length..]).ToArray();
@@ -115,20 +117,21 @@ public sealed partial class SiteEndToEndTests
             }
             """);
         Assert.True((await logout).Ok);
+        await page.WaitForURLAsync(site.Url("/umbraco/logout").ToString());
+        await Expect(page.GetByRole(AriaRole.Button, new() { Name = "Sign in with Umbraco", Exact = true })).ToBeVisibleAsync();
         var navigation = await page.GotoAsync(site.Url("/umbraco").ToString());
         Assert.True(navigation?.Ok);
         await Expect(page.Locator("#username-input")).ToBeVisibleAsync();
         await page.ReloadAsync();
         await Expect(page.Locator("#username-input")).ToBeVisibleAsync();
-        await Expect(page.Locator("umb-app")).Not.ToHaveAttributeAsync("data-restore-session", "");
         Assert.DoesNotContain(await page.Context.CookiesAsync(), cookie => cookie.Name.Contains("umbRefreshToken", StringComparison.Ordinal));
     }
 
-    private static async Task AssertServerSentEventsAsync(IPage page)
+    private static async Task AssertServerSentEventsAsync(IPage page, string hub)
     {
         await page.WaitForFunctionAsync("""
-            () => window.__testEventSources?.some(url => new URL(url).pathname.endsWith('/umbraco/PreviewHub'))
-            """, null, new() { Timeout = 30_000 });
+            hub => window.__testEventSources?.some(url => new URL(url).pathname.endsWith('/umbraco/' + hub))
+            """, hub, new() { Timeout = 30_000 });
     }
 
     private static async Task CheckDeliveryApiAsync(TestSite site, CancellationToken ct)
@@ -143,7 +146,12 @@ public sealed partial class SiteEndToEndTests
         {
             var path = item.GetProperty("route").GetProperty("path").GetString()!;
             Assert.StartsWith(site.Url("/").AbsolutePath, path, StringComparison.OrdinalIgnoreCase);
-            AssertNoDoubledPrefix(path, site);
+            // This fixture deliberately gives the new page the same slug as the IIS prefix.
+            // Both segments must survive; a textual duplicate check would reject its valid URL.
+            if (site.Options.ExistingPathBase && item.GetProperty("name").GetString() == site.Options.Prefix.Trim('/'))
+                Assert.Equal(site.Url(site.Options.Prefix.ToLowerInvariant() + "/").AbsolutePath, path);
+            else
+                AssertNoDoubledPrefix(path, site);
         }
         var media = FindMediaUrls(json.RootElement).ToArray();
         Assert.NotEmpty(media);
@@ -161,10 +169,11 @@ public sealed partial class SiteEndToEndTests
         await page.GotoAsync(site.Url($"/umbraco/section/content/workspace/document/edit/{home.Key}").ToString());
         var picker = page.Locator("umb-input-rich-media").Filter(new() { Visible = true }).First;
         await picker.GetByRole(AriaRole.Button, new() { Name = "Remove", Exact = true }).ClickAsync();
+        await page.Locator("umb-confirm-modal").GetByRole(AriaRole.Button, new() { Name = "Remove", Exact = true }).ClickAsync();
         await picker.GetByRole(AriaRole.Button, new() { Name = "Choose", Exact = true }).ClickAsync();
         var modal = page.Locator("umb-media-picker-modal");
         await Expect(modal).ToBeVisibleAsync();
-        await modal.GetByText("E2E Upload", new() { Exact = true }).ClickAsync();
+        await modal.Locator($"uui-card-media[data-mark='media:{mediaKey}']").ClickAsync();
         await modal.GetByRole(AriaRole.Button, new() { Name = "Choose", Exact = true }).ClickAsync();
         await Expect(modal).Not.ToBeAttachedAsync();
         await Expect(picker.Locator("uui-card-media")).ToHaveAttributeAsync("name", "E2E Upload");
