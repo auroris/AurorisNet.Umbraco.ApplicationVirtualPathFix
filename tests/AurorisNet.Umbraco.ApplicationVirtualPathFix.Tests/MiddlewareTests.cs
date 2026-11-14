@@ -53,7 +53,9 @@ public sealed class MiddlewareTests
     [InlineData(true, "same-origin", false, true)]
     [InlineData(false, "cross-site", false, true)]
     [InlineData(false, "cross-site", true, false)]
-    public async Task Session_hint_handles_cookies_and_cross_site_callbacks(bool cookie, string fetchSite, bool callback, bool restore)
+    [InlineData(false, null, false, false)]
+    [InlineData(true, null, false, true)]
+    public async Task Session_hint_handles_cookies_and_cross_site_callbacks(bool cookie, string? fetchSite, bool callback, bool restore)
     {
         await using var app = CreateApp();
         app.UseBackOfficeAppUnderVirtualPath();
@@ -65,7 +67,7 @@ public sealed class MiddlewareTests
         await app.StartAsync(TestContext.Current.CancellationToken);
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Accept.ParseAdd("text/html");
-        http.DefaultRequestHeaders.Add("Sec-Fetch-Site", fetchSite);
+        if (fetchSite is not null) http.DefaultRequestHeaders.Add("Sec-Fetch-Site", fetchSite);
         if (cookie) http.DefaultRequestHeaders.Add("Cookie", "umbRefreshToken=opaque");
         using var response = await http.GetAsync(Address(app) + "/umbraco" + (callback ? "?code=opaque" : ""), TestContext.Current.CancellationToken);
         Assert.Equal(restore, (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).Contains("data-restore-session"));

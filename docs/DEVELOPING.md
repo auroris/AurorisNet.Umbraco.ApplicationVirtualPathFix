@@ -31,11 +31,21 @@ test to some hosting cases with `AVPF_E2E_CASE`, for example `kestrel` or
 `root,iis-external-media-no-websockets` or `kestrel-https`. The sites start from
 `SiteTemplate`, the views a new Umbraco 18.3.1 project ships with. Third-party
 embeds and fonts receive fixed offline responses, and jQuery 3.6.0 is vendored
-under `BrowserFixtures` with its MIT license and original integrity hash. Unexpected
+under `BrowserFixtures` with its MIT license and original integrity hash. `.gitattributes`
+preserves those bytes across checkouts, including Windows with `core.autocrlf=true`. Unexpected
 external requests fail the test. After NuGet restore and browser installation, the
 suite does not need internet access. The HTTPS case uses a disposable certificate;
 no certificate is installed in the machine's trust store. See
 [Browser validation](FIXES.md#browser-validation) for the checks and their scope.
+
+`AssetPatchTests` also checks every patch against the restored Umbraco files without
+starting a site. It fails if a bundle pattern finds zero or multiple files, or if
+any search pattern has no match. Run it on its own with
+`dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-class '*AssetPatchTests'`.
+When updating `UmbracoVersion`, build and run these checks before the full suite.
+Bundle hash changes alone need no patch edits; the definitions in
+`BackOfficeAssetPatches.cs` use `-????????` for hashed filenames. The package's
+exact version dependency still identifies the release that has been validated.
 
 Clone into a short path on Windows. Playwright's package contains deeply nested
 files, and the build fails with `MSB3021` when a path exceeds 260 characters unless

@@ -17,10 +17,12 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 | Media stored outside `wwwroot` (an absolute `UmbracoMediaPhysicalRootPath`, or a provider such as Azure Blob Storage) is mounted only at the prefixed path, which requests under a path base never match. | Media is served under the prefix from any media file system, and ImageSharp crops and resizes apply to it. |
 | The thumbnail URL assembler adds the prefix again to signed media URLs, invalidating their image-processing signatures. | Already-prefixed media paths retain one prefix and their original signature. |
 | Basic authentication, the OpenAPI documents and the management API contract compare `Request.Path` with a path that includes the virtual path. With `RedirectToLoginPage`, every visitor is redirected in a loop. | Those requests see the path shape Umbraco expects, so the basic-authentication login page and the OpenAPI documents work under the prefix. |
-| The logo in the header's system-information popover uses a root-absolute URL. | The logo resolves relative to the served module, retaining its prefix and asset hash. |
+| The logo in the header's system-information popover uses a root-absolute URL. | The logo loads under the configured application prefix and asset hash. |
+| The error screen and installer/upgrader layout load their illustration from the host root. | Both load the illustration from the configured backoffice asset root. |
+| The backoffice stylesheet loads Monaco's codicon font from the host root. | The font loads relative to the stylesheet under the application prefix, including icons in the editor's Find widget. |
 | The block grid editor loads its default layout stylesheet from `/umbraco/backoffice/css/...`, and resolves a custom layout stylesheet's site path against the host root. | Both stylesheets load under the prefix. |
 | The media upload field and the preview prepend the server URL to media and page URLs that already include the virtual path. | Image previews, file links and the preview frame use the URL once. |
-| Tiptap's default stylesheet, Monaco's worker scripts and the dark/high-contrast theme stylesheets use root URLs. | They resolve beside the served modules, retaining the application prefix and asset hash. |
+| Tiptap's default stylesheet, Monaco's worker scripts and the dark/high-contrast theme stylesheets use root URLs. | They load from the configured backoffice asset root, including the application prefix and asset hash. |
 | Basic-authentication routes already include the application prefix, so MVC adds it twice to form actions and redirects. | Login forms and two-factor redirects contain the prefix once; `Url.Content` still sees the original path base. |
 | The stylesheet of Umbraco's built-in Page Not Found, No Content, Maintenance and Upgrading pages loads its fonts and background from the root. | They load from beside the stylesheet, under the prefix. |
 | Initial authentication attempts a token refresh before a fresh browser has received a refresh cookie. | The auth wrapper starts the normal sign-in flow directly when no session can exist. Existing sessions continue through Umbraco's token validation and renewal. |
@@ -35,9 +37,17 @@ cookie presence alone decides. Token values stay in HTTP-only cookies. The HTML 
 `Cache-Control: no-store` so the hint describes the current request. Patched asset
 URLs include the package build identifier so a deployment replaces cached modules.
 
+Known bundles are matched by directory and filename, with `-????????` representing
+an eight-character build hash where needed. Fixed filenames remain exact matches.
+Asset URL corrections share one rewrite of quoted `/umbraco/backoffice/` paths;
+worker filenames retain the hashes supplied by Umbraco. Changes to JavaScript
+behavior remain explicit patches. Compatibility tests check every registered
+bundle and search pattern against the installed Umbraco assets, including bundles
+the browser scenarios do not load.
+
 The package buffers only the responses it may rewrite: browser navigations under
 `/umbraco` outside the backoffice assets and the management and delivery APIs, the
-slim login script, the backoffice modules listed above and the built-in pages'
+slim login script, the backoffice modules and stylesheets listed above and the built-in pages'
 stylesheet. Everything else, including SignalR's WebSocket, Server-Sent Events and
 long-polling transports, static files and API calls, streams through untouched.
 
@@ -103,7 +113,7 @@ The five starter-kit cases each:
 - sign in to the backoffice and check the dashboard and the header logo;
 - reload and check that the session is restored through a token refresh;
 - invite an editor and follow the emailed link to the password form;
-- edit rich text, ask the JSON worker to validate invalid code, and load dark and high-contrast themes;
+- edit rich text, ask the JSON worker to validate invalid code, open the editor's Find widget and check its icon font, and load dark and high-contrast themes;
 - create a page, publish it and open it on the front end;
 - preview unpublished changes, save a second draft, and verify that the open preview updates while the public page remains unchanged;
 - upload an image, check every link to it in the backoffice, then open it and a signed resized version returned by the imaging API.

@@ -264,8 +264,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         var css = page.WaitForResponseAsync(response => new Uri(response.Url).AbsolutePath.EndsWith("/css/rte-content.css"));
         await page.EvaluateAsync("""
             async () => {
-              const map = JSON.parse(document.querySelector('script[type="importmap"]').textContent);
-              await import(new URL('./input-tiptap.element-C2HEaB-_.js', new URL(map.imports['@umbraco-cms/backoffice/tiptap'], location.href)).href);
+              await import('@umbraco-cms/backoffice/tiptap');
               await import('@umbraco-cms/backoffice/code-editor');
               const container = document.createElement('div');
               container.id = 'test-editors';
@@ -295,6 +294,18 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             }
             """).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.True(errors > 0, "The JSON worker should report the deliberately invalid JSON.");
+        // The editor alone need not render any codicons. Find displays them and loads their font.
+        await page.EvaluateAsync("""
+            () => document.querySelector('umb-app').shadowRoot.querySelector('umb-code-editor')
+              .editor.monacoEditor.getAction('actions.find').run()
+            """);
+        await Expect(page.Locator("#test-editors .find-widget")).ToBeVisibleAsync();
+        Assert.True(await page.EvaluateAsync<bool>("""
+            async () => {
+              const fonts = await document.fonts.load('16px codicon');
+              return fonts.length > 0 && fonts.every(font => font.status === 'loaded');
+            }
+            """), "The code editor's icon font must load successfully.");
         await page.Locator("#test-editors").EvaluateAsync("element => element.remove()");
 
         foreach (var (theme, filename) in new[] { ("umb-dark-theme", "dark.css"), ("umb-high-contrast-theme", "high-contrast.css") })

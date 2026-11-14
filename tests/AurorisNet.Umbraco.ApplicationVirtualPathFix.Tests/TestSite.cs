@@ -158,8 +158,7 @@ internal sealed class TestSite : IAsyncDisposable
             ["Umbraco:CMS:Global:Smtp:PickupDirectoryLocation"] = Path.Combine(root, "mail"),
             ["Umbraco:CMS:WebRouting:ApplicationUrlDetection"] = "FirstRequest",
             ["Umbraco:CMS:Hosting:ApplicationVirtualPath"] = options.Prefix,
-            // As in the template's Development settings. Debug also serves backoffice modules with
-            // no-cache; the HTTP checks below exercise conditional (304) requests.
+            // As in the template's Development settings; serves backoffice modules with no-cache.
             ["Umbraco:CMS:Hosting:Debug"] = "true",
             ["Umbraco:CMS:TypeFinder:AdditionalAssemblyExclusionEntries:0"] = "xunit.",
             ["Umbraco:CMS:Unattended:InstallUnattended"] = "true",
@@ -329,9 +328,10 @@ internal sealed class TestSite : IAsyncDisposable
             {
                 Directory.Delete(fullRoot, recursive: true);
             }
-            catch (IOException)
+            catch (IOException exception)
             {
                 // A file still held open must not hide the test's own result.
+                TestContext.Current.TestOutputHelper?.WriteLine($"Could not remove test site {fullRoot}: {exception.Message}");
             }
         }
     }

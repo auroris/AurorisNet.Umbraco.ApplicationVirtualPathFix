@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Encodings.Web;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core.Configuration.Models;
@@ -42,84 +41,6 @@ internal static class BackOfficeAppUnderVirtualPath
     internal static readonly string BuildVersion = typeof(BackOfficeAppUnderVirtualPath).Assembly.ManifestModule.ModuleVersionId.ToString("N");
     private static readonly PathString[] Untouched = ["/umbraco/backoffice", "/umbraco/management", "/umbraco/delivery"];
 
-    /// <summary>
-    /// Root-absolute URLs in Umbraco 18.3.1's backoffice modules, keyed by each module's path under the
-    /// backoffice assets. Relative URLs resolve from the served module, keeping the prefix and asset hash.
-    /// </summary>
-    private static readonly Dictionary<string, (string Pattern, string Replacement)[]> ModulePatches = new(StringComparer.Ordinal)
-    {
-        // The logo in the header's system-information popover.
-        ["/apps/backoffice/components/backoffice-header-logo.element.js"] =
-        [
-            ("src=\"/umbraco/backoffice/assets/umbraco-logo.svg\"",
-                "src=${new URL(\"../../../assets/umbraco-logo.svg\", import.meta.url).href}"),
-        ],
-        // The block grid's default layout stylesheet.
-        ["/packages/block/data-path-generator-for-element-data.function-Ck1qUJio.js"] =
-        [
-            ("const c = \"/umbraco/backoffice/css/umbraco-blockgridlayout.css\"",
-                "const c = new URL(\"../../css/umbraco-blockgridlayout.css\", import.meta.url).pathname"),
-        ],
-        // The block grid layout-stylesheet setting's link to that default.
-        ["/packages/block/property-editor-ui-block-grid-layout-stylesheet.element-Kdskf0vB.js"] =
-        [
-            ("href=\"/umbraco/backoffice/css/umbraco-blockgridlayout.css\"",
-                "href=${new URL(\"../../css/umbraco-blockgridlayout.css\", import.meta.url).pathname}"),
-        ],
-        // A custom layout stylesheet's site path, which must resolve under the server URL's path too.
-        ["/packages/block/property-editor-ui-block-grid.element-_WZbZIkq.js"] =
-        [
-            ("new URL(oi(o), this.#s).href", "new URL(oi(o).replace(/^\\/(?!\\/)/, \"\"), this.#s + \"/\").href"),
-        ],
-        // Media and published-page URLs from the server already include the virtual path, so they
-        // resolve against the server URL's origin instead of being appended to the whole server URL.
-        ["/packages/media/input-upload-field.element-WuB12A7G.js"] =
-        [
-            ("this.src.startsWith(\"/\") ? `${this._serverUrl}${this.src}` : this.src",
-                "this.src.startsWith(\"/\") ? new URL(this.src, this._serverUrl || location.origin).href : this.src"),
-            ("e = i ? t : this._serverUrl + t", "e = i ? t : new URL(t, this._serverUrl || location.origin).href"),
-        ],
-        ["/packages/preview/index.js"] =
-        [
-            ("s.url.startsWith(\"/\") ? `${this.#o}${s.url}` : s.url",
-                "s.url.startsWith(\"/\") ? new URL(s.url, this.#o || location.origin).href : s.url"),
-            // The preview frame resolves the document key against the server URL, which only keeps
-            // the server URL's path when it ends with a slash.
-            ("const n = new URL(s, t)", "const n = new URL(s, t.endsWith(\"/\") ? t : t + \"/\")"),
-        ],
-        ["/packages/tiptap/input-tiptap.element-C2HEaB-_.js"] =
-        [
-            ("\"/umbraco/backoffice/css/rte-content.css\"",
-                "new URL(\"../../css/rte-content.css\", import.meta.url).pathname"),
-        ],
-        ["/packages/core/manifests.js"] =
-        [
-            ("css: \"/umbraco/backoffice/css/dark.css\"",
-                "css: new URL(\"../../css/dark.css\", import.meta.url).pathname"),
-            ("css: \"/umbraco/backoffice/css/high-contrast.css\"",
-                "css: new URL(\"../../css/high-contrast.css\", import.meta.url).pathname"),
-        ],
-        // Vite's worker constructors contain root URLs, independent of the import map.
-        ["/external/monaco-editor/rust-CWMmcrOS.js"] =
-        [
-            WorkerPatch("editor.worker-LB_7Ltyq.js"),
-            WorkerPatch("json.worker-DQOG4ivs.js"),
-            WorkerPatch("css.worker-B3BImrxk.js"),
-            WorkerPatch("html.worker-Cq-Lc34v.js"),
-            WorkerPatch("ts.worker-DMY5tkUi.js"),
-        ],
-        // These language modules already use new URL(..., import.meta.url).
-        ["/external/monaco-editor/jsonMode-C77h2I9n.js"] =
-            [("\"/umbraco/backoffice/external/monaco-editor/assets/", "\"./assets/")],
-        ["/external/monaco-editor/htmlMode-BQH4tjQN.js"] =
-            [("\"/umbraco/backoffice/external/monaco-editor/assets/", "\"./assets/")],
-        ["/external/monaco-editor/tsMode-rn8r1OtC.js"] =
-            [("\"/umbraco/backoffice/external/monaco-editor/assets/", "\"./assets/")],
-    };
-
-    private static (string Pattern, string Replacement) WorkerPatch(string file)
-        => ($"\"/umbraco/backoffice/external/monaco-editor/assets/{file}\"", $"new URL(\"./assets/{file}\", import.meta.url)");
-
     private enum Target
     {
         None,
@@ -136,13 +57,7 @@ internal static class BackOfficeAppUnderVirtualPath
         var paths = services.GetRequiredService<IBackOfficePathGenerator>();
         var backOfficePath = paths.BackOfficePath;
         var basicAuthPath = new PathString(backOfficePath + "/basic-auth");
-        // After UseUmbracoPathsUnderPathBase, hashed requests carry the virtual directory in their path.
-        var modules = new Dictionary<PathString, string>();
-        foreach (var module in ModulePatches.Keys)
-        {
-            modules[new PathString(paths.BackOfficeAssetsPath + module)] = module;
-            modules[new PathString("/umbraco/backoffice" + module)] = module;
-        }
+        var assetsPath = paths.BackOfficeAssetsPath;
 
 #pragma warning disable CS0618 // Umbraco 18's token handler still uses these options; the replacement is scheduled for 19.
         var cookies = services.GetRequiredService<IOptions<BackOfficeTokenCookieSettings>>().Value;
@@ -155,7 +70,7 @@ internal static class BackOfficeAppUnderVirtualPath
         return app.Use(async (context, next) =>
         {
             var request = context.Request;
-            var target = Classify(request, modules, basicAuthPath, out var module);
+            var target = Classify(request, assetsPath, basicAuthPath, out var module);
             if (target == Target.None)
             {
                 await next(context);
@@ -192,9 +107,12 @@ internal static class BackOfficeAppUnderVirtualPath
                 || context.Response.Headers.ContentEncoding.Count > 0 ? null : target switch
             {
                 Target.Page => PatchPage(context, bytes),
-                Target.LoginScript => PatchLoginScript(request, bytes),
-                Target.Module => PatchModule(module!, bytes),
-                Target.WebsiteStyles => PatchWebsiteStyles(bytes),
+                Target.LoginScript => Encoding.UTF8.GetBytes(BackOfficeAssetPatches.PatchLoginScript(
+                    Encoding.UTF8.GetString(bytes), request.PathBase.Value!, backOfficePath, missingPatches.Report)),
+                Target.Module => Encoding.UTF8.GetBytes(BackOfficeAssetPatches.PatchModule(
+                    module!, Encoding.UTF8.GetString(bytes), assetsPath, missingPatches.Report)),
+                Target.WebsiteStyles => Encoding.UTF8.GetBytes(BackOfficeAssetPatches.PatchWebsiteStyles(
+                    Encoding.UTF8.GetString(bytes), missingPatches.Report)),
                 _ => null,
             };
             if (patched is not null)
@@ -249,42 +167,9 @@ internal static class BackOfficeAppUnderVirtualPath
             return Encoding.UTF8.GetBytes(html);
         }
 
-        byte[] PatchLoginScript(HttpRequest request, byte[] bytes)
-        {
-            var prefix = JsonSerializer.Serialize(request.PathBase.Value);
-            // These are the three root assumptions in Umbraco 18.3's slim login bundle.
-            // Scope the replacements to this asset, leaving return-URL origin checks intact.
-            var script = Encoding.UTF8.GetString(bytes);
-            script = missingPatches.Replace(script, "login.js", "new Request(\"/umbraco/", $"new Request({prefix} + \"/umbraco/");
-            script = missingPatches.Replace(script, "login.js", "const r = window.location.origin, o = new Rt(e, r);",
-                $"const r = window.location.origin + {prefix}, o = new Rt(e, r);");
-            script = missingPatches.Replace(script, "login.js", "backofficePath: \"/umbraco\"",
-                $"backofficePath: {JsonSerializer.Serialize(backOfficePath)}");
-            // The slim login never configures the shared API client; manifest and password-reset
-            // calls otherwise still use the origin even after its server context is corrected.
-            script = "import { umbHttpClient } from '@umbraco-cms/backoffice/http-client';\n"
-                + $"umbHttpClient.setConfig({{ baseUrl: window.location.origin + {prefix} }});\n" + script;
-            return Encoding.UTF8.GetBytes(script);
-        }
-
-        byte[] PatchModule(string module, byte[] bytes)
-        {
-            var script = Encoding.UTF8.GetString(bytes);
-            foreach (var (pattern, replacement) in ModulePatches[module])
-                script = missingPatches.Replace(script, module, pattern, replacement);
-            return Encoding.UTF8.GetBytes(script);
-        }
-
-        byte[] PatchWebsiteStyles(byte[] bytes)
-        {
-            // The stylesheet of Umbraco's own Page Not Found, No Content, Maintenance and Upgrading
-            // pages loads its fonts and background from the root. Resolve them next to the stylesheet.
-            var styles = missingPatches.Replace(Encoding.UTF8.GetString(bytes), "nonodes.css", "url(/umbraco/website/", "url(");
-            return Encoding.UTF8.GetBytes(styles);
-        }
     }
 
-    private static Target Classify(HttpRequest request, Dictionary<PathString, string> modules, PathString basicAuthPath, out string? module)
+    private static Target Classify(HttpRequest request, PathString assetsPath, PathString basicAuthPath, out string? module)
     {
         module = null;
         // In particular, never replace the response stream of a SignalR WebSocket upgrade.
@@ -299,7 +184,7 @@ internal static class BackOfficeAppUnderVirtualPath
             return Target.None;
         if (request.PathBase.HasValue)
         {
-            if (modules.TryGetValue(request.Path, out module))
+            if (BackOfficeAssetPatches.TryGetModule(request.Path, assetsPath, out module))
                 return Target.Module;
             if (request.Path == LoginScript)
                 return Target.LoginScript;
@@ -348,10 +233,8 @@ internal static class BackOfficeAppUnderVirtualPath
     {
         private readonly ConcurrentDictionary<string, bool> _reported = new(StringComparer.Ordinal);
 
-        public string Replace(string text, string resource, string pattern, string replacement)
+        public void Report(string resource, string pattern)
         {
-            if (text.Contains(pattern, StringComparison.Ordinal))
-                return text.Replace(pattern, replacement, StringComparison.Ordinal);
             if (_reported.TryAdd(resource + "\n" + pattern, true))
             {
                 logger.LogWarning(
@@ -359,8 +242,6 @@ internal static class BackOfficeAppUnderVirtualPath
                     + "Install the AurorisNet.Umbraco.ApplicationVirtualPathFix release that matches this site's Umbraco version.",
                     resource, pattern);
             }
-
-            return text;
         }
     }
 }
