@@ -87,7 +87,6 @@ internal static class UmbracoPathsUnderPathBase
             finally
             {
                 request.Path = originalPath;
-                request.PathBase = originalPathBase;
             }
         });
     }

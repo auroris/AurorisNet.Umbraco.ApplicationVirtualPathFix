@@ -19,36 +19,24 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
     private const string PageName = "Virtual path e2e page";
     private ITestOutputHelper _log = output;
 
-    [Theory]
-    [InlineData("", TestHost.Kestrel, false, true)]
-    [InlineData("/SomeTestPath", TestHost.Kestrel, false, true)]
-    [InlineData("/a/b", TestHost.Kestrel, true, true, false, false)] // Nested path and production asset caching.
-    [InlineData("/SomeTestPath", TestHost.Iis, true, false)]
-    [InlineData("/SomeTestPath", TestHost.Kestrel, false, true, true)]
-    [InlineData("/SomeTestPath", TestHost.ReverseProxy, false, false, true)]
-    [InlineData("", TestHost.ReverseProxy, false, false, true)]
-    public async Task Starter_kit_site_works_end_to_end(string prefix, TestHost host, bool mediaOutsideWebRoot, bool webSockets, bool https = false, bool debug = true)
+    [Fact]
+    public async Task Patched_features_work_under_a_nested_https_path()
     {
         var ct = TestContext.Current.CancellationToken;
-        var name = $"{(prefix.Length == 0 ? "root" : host == TestHost.Iis ? "iis" : "kestrel")}{(mediaOutsideWebRoot ? "-external-media" : "")}{(webSockets ? "" : "-no-websockets")}";
-        if (host == TestHost.ReverseProxy) name += "-proxy";
-        if (https) name += "-https";
-        // Set AVPF_E2E_CASE to case names, such as kestrel or root,kestrel, to run just those hosting cases.
-        if (Environment.GetEnvironmentVariable("AVPF_E2E_CASE") is { Length: > 0 } only && !only.Split(',').Contains(name))
-            Assert.Skip($"AVPF_E2E_CASE selects {only}.");
-        var log = TeeOutput.Create(_log, name);
-        _log = log;
-        await using var site = await TestSite.StartAsync(new SiteOptions(prefix, host, mediaOutsideWebRoot, webSockets, Https: https, Debug: debug), ct, log.DirectoryPath);
+        var log = StartCase("full");
+        // Exercise the affected features once, combining independent hosting settings.
+        await using var site = await TestSite.StartAsync(new SiteOptions("/SomeTestPath/Nested",
+            MediaOutsideWebRoot: true, Https: true, Debug: false), ct, log.DirectoryPath);
         await using (var browser = await BrowserSession.StartAsync(site, _log, log.DirectoryPath))
         {
             await browser.StepAsync("OpenAPI documents", () => CheckOpenApiAsync(site, ct));
             await browser.StepAsync("Front end: every page and image", () => CrawlFrontEndAsync(browser.Page, site));
             await browser.StepAsync("Forgotten password email", () => FollowPasswordResetEmailAsync(browser, site, ct));
             await browser.StepAsync("Backoffice sign-in", () => SignInAsync(browser.Page, site));
+            await browser.StepAsync("Server context", () => CheckServerContextAsync(browser.Page, site));
             await browser.StepAsync("Patched modules and HTTP caching", () => CheckPatchedAssetsAsync(browser.Page, site, ct));
             await browser.StepAsync("Session restore after reload", () => ReloadAndRestoreSessionAsync(browser.Page, site));
-            if (https)
-                await browser.StepAsync("Cross-site session restore", () => RestoreFromExternalLinkAsync(browser, site));
+            await browser.StepAsync("Cross-site session restore", () => RestoreFromExternalLinkAsync(browser, site));
             await browser.StepAsync("Rich text, code editors and themes", () => CheckEditorsAndThemesAsync(browser.Page, site));
             await browser.StepAsync("Block grid stylesheets", () => CheckBlockGridAsync(browser.Page, site));
             await browser.StepAsync("Invitation email", () => FollowInvitationEmailAsync(browser, site, ct));
@@ -63,11 +51,61 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Iis_path_base_preserves_repeated_slugs_and_sse_preview()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var log = StartCase("iis");
+        await using var site = await TestSite.StartAsync(new SiteOptions("/SomeTestPath",
+            TestHost.Iis, WebSockets: false), ct, log.DirectoryPath);
+        await using (var browser = await BrowserSession.StartAsync(site, _log, log.DirectoryPath))
+        {
+            await browser.StepAsync("OpenAPI documents", () => CheckOpenApiAsync(site, ct));
+            await browser.StepAsync("Backoffice sign-in", () => SignInAsync(browser.Page, site));
+            await browser.StepAsync("Server context and SSE", () => CheckServerContextAsync(browser.Page, site));
+            await browser.StepAsync("Session restore after reload", () => ReloadAndRestoreSessionAsync(browser.Page, site));
+            await browser.StepAsync("Repeated content slug and SSE preview", () => CreateAndPublishPageAsync(browser.Page, site, ct));
+            await browser.StepAsync("Delivery API", () => CheckDeliveryApiAsync(site, ct));
+            await browser.StepAsync("Sign out", () => SignOutAsync(browser.Page, site));
+            await browser.AssertNoErrorsAsync();
+        }
+
+        Assert.Empty(await site.StopAsync());
+    }
+
+    [Theory]
+    [InlineData("/SomeTestPath")]
+    [InlineData("")]
+    public async Task Forwarded_headers_preserve_public_urls(string prefix)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var log = StartCase(prefix.Length == 0 ? "proxy-root" : "proxy");
+        await using var site = await TestSite.StartAsync(new SiteOptions(prefix,
+            TestHost.ReverseProxy, Https: true), ct, log.DirectoryPath);
+        await using (var browser = await BrowserSession.StartAsync(site, _log, log.DirectoryPath))
+        {
+            await browser.StepAsync("Public home page", async () =>
+            {
+                var response = await browser.Page.GotoAsync(site.Url("/").ToString());
+                Assert.True(response?.Ok);
+                await Expect(browser.Page.Locator("main")).ToBeVisibleAsync();
+                Assert.Empty(await LoadImagesAsync(browser.Page));
+            });
+            await browser.StepAsync("Backoffice sign-in", () => SignInAsync(browser.Page, site));
+            await browser.StepAsync("Forwarded server URL", () => CheckServerContextAsync(browser.Page, site));
+            await browser.StepAsync("Session restore after reload", () => ReloadAndRestoreSessionAsync(browser.Page, site));
+            await browser.StepAsync("Cross-site session restore", () => RestoreFromExternalLinkAsync(browser, site));
+            await browser.StepAsync("Sign out", () => SignOutAsync(browser.Page, site));
+            await browser.AssertNoErrorsAsync();
+        }
+
+        Assert.Empty(await site.StopAsync());
+    }
+
+    [Fact]
     public async Task Basic_authentication_login_works_in_a_subdirectory()
     {
         var ct = TestContext.Current.CancellationToken;
-        var log = TeeOutput.Create(_log, "kestrel-basic-auth");
-        _log = log;
+        var log = StartCase("basic-auth");
         await using var site = await TestSite.StartAsync(new SiteOptions("/SomeTestPath", BasicAuth: true), ct, log.DirectoryPath);
         await using (var browser = await BrowserSession.StartAsync(site, _log, log.DirectoryPath))
         {
@@ -102,6 +140,16 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         }
 
         Assert.Empty(await site.StopAsync());
+    }
+
+    private TeeOutput StartCase(string name)
+    {
+        // Filter before installing any site, including the basic-authentication case.
+        if (Environment.GetEnvironmentVariable("AVPF_E2E_CASE") is { Length: > 0 } only && !only.Split(',').Contains(name))
+            Assert.Skip($"AVPF_E2E_CASE selects {only}.");
+        var log = TeeOutput.Create(_log, name);
+        _log = log;
+        return log;
     }
 
     private static async Task CheckOpenApiAsync(TestSite site, CancellationToken ct)

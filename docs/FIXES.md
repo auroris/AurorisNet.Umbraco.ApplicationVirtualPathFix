@@ -16,7 +16,7 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 | The slim login script uses root URLs for login, two-factor verification and its shared API client. | The served script uses the application prefix for those requests, including public package manifests and password resets. |
 | Password-reset and invitation emails link to `/umbraco/login` at the host root. | The emailed links include the application path. |
 | Media stored outside `wwwroot` (an absolute `UmbracoMediaPhysicalRootPath`, or a provider such as Azure Blob Storage) is mounted only at the prefixed path, which requests under a path base never match. | Media is served under the prefix from any media file system, and ImageSharp crops and resizes apply to it. |
-| The thumbnail URL assembler adds the prefix again to signed media URLs, invalidating their image-processing signatures. | Already-prefixed media paths retain one prefix and their original signature. |
+| The thumbnail URL assembler adds the prefix again to signed media URLs, invalidating their image-processing signatures. | Already-prefixed media paths retain one prefix, their original query string and any URL fragment. |
 | Basic authentication, the OpenAPI documents and the management API contract compare `Request.Path` with a path that includes the virtual path. With `RedirectToLoginPage`, every visitor is redirected in a loop. | Those requests see the path shape Umbraco expects, so the basic-authentication login page and the OpenAPI documents work under the prefix. |
 | The logo in the header's system-information popover uses a root-absolute URL. | The logo loads under the configured application prefix and asset hash. |
 | The error screen and installer/upgrader layout load their illustration from the host root. | Both load the illustration from the configured backoffice asset root. |
@@ -94,20 +94,20 @@ the application path; that is outside the package's scope.
 ## Browser validation
 
 The Playwright suite builds disposable sites the way `dotnet new umbraco` does with
-the starter kit: SQLite, Kestrel, unattended install and standard startup. It runs
-each site through Chromium:
+the starter kit: SQLite, Kestrel, unattended install and standard startup. It uses
+five sites: one comprehensive journey through the affected features and four
+focused hosting checks. Each site has its own database because these settings
+affect startup, authentication and URL generation.
 
-| Case | Hosting |
+| Case | Configuration and coverage |
 |---|---|
-| Site root | Open `/` and `/umbraco`. |
-| Kestrel subdirectory | Open `/SomeTestPath/...`; the fixture returns 404 for requests outside `/SomeTestPath`. |
-| Kestrel nested subdirectory, external media | Open `/a/b/...`, with media outside `wwwroot` and `Hosting:Debug=false` to exercise asset caching. |
-| Kestrel HTTPS subdirectory | A temporary certificate exercises secure cookies and cross-site session restoration. |
-| IIS child application | The fixture sets the path base before the package runs and removes WebSocket support, as IIS without the WebSocket Protocol feature does, with external media. |
-| Reverse proxy, subdirectory and site root | The fixture strips the prefix and rewrites the incoming host and scheme, then applies `X-Forwarded-Prefix`, `X-Forwarded-Host` and `X-Forwarded-Proto` through `UseForwardedHeaders`. Both cases use HTTPS and disable WebSockets. |
-| Basic authentication | Kestrel subdirectory with the basic-authentication login page enabled. |
+| `full` | Kestrel at `/SomeTestPath/Nested`, HTTPS, media outside `wwwroot` and `Hosting:Debug=false`. Runs the journey below, including secure cookies and cross-site session restoration. |
+| `iis` | Plain HTTP at `/SomeTestPath`, with the path base supplied before the package and WebSockets disabled. Checks OpenAPI, sign-in, session restore, server-event SSE, a content slug repeating the prefix, draft preview over SSE, Delivery API URLs and sign-out. |
+| `proxy` | HTTPS at `/SomeTestPath`, forwarded prefix, host and scheme. Checks the home page and images, sign-in, the public server URL, session restore, cross-site cookies and sign-out. |
+| `proxy-root` | The same focused proxy checks at the site root, guarding against the internal backend host leaking into URLs. |
+| `basic-auth` | Plain HTTP subdirectory with basic authentication enabled. Checks the two-factor redirect, an invalid password followed by a successful login, and the front end. |
 
-The seven starter-kit cases each:
+The `full` case:
 
 - request the OpenAPI documents;
 - visit every front-end page reachable from the home page and check that each image loads;
@@ -125,12 +125,14 @@ The seven starter-kit cases each:
 - check the Delivery API's route and media URLs;
 - sign out, verify the prefixed logout redirect, and reload to check the session stays signed out.
 
-The basic-authentication case checks a two-factor redirect, retries after an invalid
-password, signs in and checks that the home page loads. The IIS-style case
-also uses a content slug matching the application prefix. Focused middleware tests
-cover response-compression ordering, conditional responses, precompressed content
-and session hints, plus startup version warnings and reporting each missing patch
-only once. The cases without WebSockets observe an actual EventSource open event
+The other cases reuse only the steps relevant to their hosting risks; they do not
+repeat the front-end crawl, email, editor, stylesheet or media-upload journey.
+Focused middleware tests cover response-compression ordering, conditional responses,
+precompressed content, request and stream restoration, pass-through responses and
+session hints with custom cookie settings. They also check startup version warnings
+and reporting each missing patch only once. URL tests cover prefix boundaries,
+signed queries and fragments, import maps and OAuth callbacks without starting a
+site. The IIS-style case observes an actual EventSource open event
 for both the backoffice server-events hub and the preview hub. Each site has image
 signing enabled with a fresh test key.
 

@@ -11,13 +11,17 @@ the repository root:
 
 ```powershell
 dotnet build tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests
+dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-not-class '*SiteEndToEndTests'
 pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
-dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build
+dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-class '*SiteEndToEndTests'
 ```
 
-Repeat the browser installation after upgrading Playwright. The tests build
-starter-kit sites with their own SQLite databases and start Kestrel on free
-loopback ports, one site at a time; a full run takes several minutes. When a step
+The release workflow uses the same order: fast asset, URL and middleware checks first,
+then the browser suite. Omit the class filter to run everything in one invocation.
+Repeat the browser installation after upgrading Playwright. The browser tests build
+five starter-kit sites with their own SQLite databases and start Kestrel on free
+loopback ports, one site at a time. One runs the full affected-feature journey;
+the other four check specific hosting risks. When a step
 fails, the test output includes the page's accessibility tree, and screenshots are
 saved under `bin/Debug/net10.0/e2e-artifacts/<case>/<run>`, next to a `test-output.log`,
 Playwright `trace.zip` and a copy of the site's JSON logs. Traces and logs are saved
@@ -26,15 +30,16 @@ workflow uploads these diagnostics even when a test fails. Open a trace with
 `pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 show-trace <path-to-trace.zip>`.
 Set `AVPF_KEEP_TEST_SITE=1` to keep each
 site's folder in the temp directory, with its database and Umbraco logs. Run a
-single test with `-- --filter-method "*Basic_authentication*"`, and limit the site
-test to some hosting cases with `AVPF_E2E_CASE`, for example `kestrel` or
-`root,iis-external-media-no-websockets` or `kestrel-https`. The sites start from
+single test with `-- --filter-method "*Basic_authentication*"`, or select browser
+cases with `AVPF_E2E_CASE`: `full`, `iis`, `proxy`, `proxy-root`, or `basic-auth`.
+Comma-separated lists such as `iis,proxy` are supported; unselected cases skip
+before installing a site. The sites start from
 `SiteTemplate`, the views a new Umbraco 18.3.1 project ships with. Third-party
 embeds and fonts receive fixed offline responses, and jQuery 3.6.0 is vendored
 under `BrowserFixtures` with its MIT license and original integrity hash. `.gitattributes`
 preserves those bytes across checkouts, including Windows with `core.autocrlf=true`. Unexpected
 external requests fail the test. After NuGet restore and browser installation, the
-suite does not need internet access. The HTTPS case uses a disposable certificate;
+suite does not need internet access. HTTPS cases use disposable certificates;
 no certificate is installed in the machine's trust store. See
 [Browser validation](FIXES.md#browser-validation) for the checks and their scope.
 
@@ -48,15 +53,22 @@ Bundle hash changes alone need no patch edits; the definitions in
 exact version dependency still identifies the release that has been validated.
 
 `AssetCoverageTests` independently scans the restored JavaScript and CSS for
-root-absolute asset references and reviews server-URL consumers and concatenations.
+root-absolute asset references and inventories server-URL consumers.
 New or renamed files fail the scan unless a patch handles them or an explicit
 exception explains the reference. These are conservative source checks, not a
-JavaScript parser; inspect each new match when upgrading Umbraco.
+JavaScript parser; inspect each new match when upgrading Umbraco. The scan does
+not try to infer URL behavior from arbitrary string concatenations. Patch checks
+and the browser journey cover the known URL corrections.
 
-The browser cases also import every registered JavaScript module and request real
-static files with `If-None-Match`. `kestrel-external-media` uses `/a/b` with
-`Hosting:Debug=false`. The proxy cases are `kestrel-no-websockets-proxy-https` and
-`root-no-websockets-proxy-https`: the fixture changes the incoming scheme and host,
+`UrlTests` checks media-prefix boundaries, signed queries and fragments, import-map
+entries and scopes, and OAuth callbacks without starting a site. Middleware checks
+also exercise stream and request-state restoration, pass-through responses, UTF-8
+content lengths and session hints with configured cookie names and SameSite modes.
+
+The `full` browser case imports every registered JavaScript module and requests real
+static files with `If-None-Match`. It combines `/SomeTestPath/Nested`, HTTPS,
+external media and `Hosting:Debug=false` in one site. The proxy cases are `proxy`
+and `proxy-root`: the fixture changes the incoming scheme and host,
 strips the prefix, then passes the original values through `UseForwardedHeaders`.
 They model proxy input within Kestrel; they do not start a separate proxy server.
 
@@ -75,8 +87,9 @@ Invoke-Pester .github/scripts/Get-ReleaseVersion.Tests.ps1 -CI
 ```
 
 These tests create disposable Git repositories and cover initial and subsequent
-revisions, tagged retries, stale commits, branch/checkout mismatches and malformed
-version properties. They do not tag or publish this repository.
+revisions, the assembly revision limit, tagged retries, stale commits,
+branch/checkout mismatches and malformed version properties. They do not tag or
+publish this repository.
 
 Clone into a short path on Windows. Playwright's package contains deeply nested
 files, and the build fails with `MSB3021` when a path exceeds 260 characters unless
@@ -100,7 +113,7 @@ Run workflow** on GitHub and select that branch. The workflow:
 
 1. Checks that the branch name matches the configured Umbraco version and
    chooses the next `18.3.1.<revision>` from the existing release tags.
-2. Builds, installs Chromium and runs the browser tests before packing.
+2. Builds, runs the fast compatibility checks, then installs Chromium and runs the browser tests before packing.
 3. Reserves a tag such as `v18.3.1.2` at the tested commit.
 4. Publishes the package to NuGet and creates a GitHub release with the package
    attached.

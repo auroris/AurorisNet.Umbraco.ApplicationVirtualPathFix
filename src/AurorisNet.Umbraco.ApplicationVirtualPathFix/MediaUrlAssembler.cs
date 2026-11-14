@@ -21,8 +21,12 @@ internal sealed class MediaUrlAssembler(IUrlAssembler inner, IHostingEnvironment
             return result;
 
         var resultPath = result.GetSafeAbsolutePath();
-        return resultPath.StartsWith(_prefix + _mediaPath, StringComparison.OrdinalIgnoreCase)
-            ? result.Rewrite(resultPath[_prefix.Length..])
-            : result;
+        if (!resultPath.StartsWith(_prefix + _mediaPath, StringComparison.OrdinalIgnoreCase))
+            return result;
+
+        // Umbraco's Uri.Rewrite helper discards the fragment. Keep both it and the signed query.
+        return result.IsAbsoluteUri
+            ? new Uri(result.GetLeftPart(UriPartial.Authority) + resultPath[_prefix.Length..] + result.Query + result.Fragment)
+            : new Uri(result.OriginalString[_prefix.Length..], UriKind.Relative);
     }
 }

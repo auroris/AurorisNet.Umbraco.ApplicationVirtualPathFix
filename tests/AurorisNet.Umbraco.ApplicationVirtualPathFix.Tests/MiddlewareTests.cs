@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net;
+using System.Text;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Umbraco.Cms.Core.Configuration.Models;
@@ -80,21 +81,13 @@ public sealed class MiddlewareTests
     public async Task Session_hint_handles_cookies_and_cross_site_callbacks(bool cookie, string? fetchSite, bool callback, bool restore)
     {
         await using var app = CreateApp();
-        app.UseBackOfficeAppUnderVirtualPath();
-        app.Run(async context =>
-        {
-            context.Response.ContentType = "text/html";
-            await context.Response.WriteAsync("<umb-app lang=\"en\"></umb-app>");
-        });
-        await app.StartAsync(TestContext.Current.CancellationToken);
-        using var http = new HttpClient();
-        http.DefaultRequestHeaders.Accept.ParseAdd("text/html");
-        if (fetchSite is not null) http.DefaultRequestHeaders.Add("Sec-Fetch-Site", fetchSite);
-        if (cookie) http.DefaultRequestHeaders.Add("Cookie", "umbRefreshToken=opaque");
-        using var response = await http.GetAsync(Address(app) + "/umbraco" + (callback ? "?code=opaque" : ""), TestContext.Current.CancellationToken);
-        Assert.Equal(restore, (await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).Contains("data-restore-session"));
-        Assert.True(response.Headers.CacheControl?.NoStore);
-        await app.StopAsync(CancellationToken.None);
+        using var body = new MemoryStream();
+        var context = CreateContext(app, body);
+        context.Request.PathBase = PathString.Empty;
+        if (fetchSite is not null) context.Request.Headers["Sec-Fetch-Site"] = fetchSite;
+        if (cookie) context.Request.Headers.Cookie = "umbRefreshToken=opaque";
+        if (callback) context.Request.QueryString = new QueryString("?code=opaque");
+        await AssertSessionHintAsync(app, context, body, restore);
     }
 
     [Fact]
@@ -127,19 +120,21 @@ public sealed class MiddlewareTests
     }
 
     [Theory]
-    [InlineData(1, false)]
-    [InlineData(2, true)]
-    public void Startup_warns_only_for_a_different_Umbraco_version(int patch, bool expectedWarning)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Startup_warns_only_for_a_different_Umbraco_version(bool differentVersion)
     {
+        var installed = new UmbracoVersion().Version;
+        var actual = differentVersion ? new Version(installed.Major, installed.Minor, installed.Build + 1) : installed;
         using var logger = new RecordedLogs();
         using var services = new ServiceCollection().AddLogging(logging => logging.AddProvider(logger))
-            .AddSingleton<IUmbracoVersion>(new TestVersion(patch)).BuildServiceProvider();
+            .AddSingleton<IUmbracoVersion>(new TestVersion(actual)).BuildServiceProvider();
         ApplicationVirtualPathFixComposer.WarnOnUmbracoVersionMismatch(services);
-        Assert.Equal(expectedWarning ? 1 : 0, logger.Warnings.Count);
-        if (expectedWarning)
+        Assert.Equal(differentVersion ? 1 : 0, logger.Warnings.Count);
+        if (differentVersion)
         {
-            Assert.Contains("18.3.1", logger.Warnings.Single());
-            Assert.Contains("18.3.2", logger.Warnings.Single());
+            Assert.Contains(installed.ToString(), logger.Warnings.Single());
+            Assert.Contains(actual.ToString(), logger.Warnings.Single());
         }
     }
 
@@ -148,26 +143,190 @@ public sealed class MiddlewareTests
     {
         using var logger = new RecordedLogs();
         await using var app = CreateApp(logger);
-        app.UsePathBase("/portal");
         app.UseBackOfficeAppUnderVirtualPath();
         app.Run(context => context.Response.WriteAsync("/* upstream changed */"));
-        await app.StartAsync(TestContext.Current.CancellationToken);
-        using var http = new HttpClient();
+        var pipeline = ((IApplicationBuilder)app).Build();
         for (var attempt = 0; attempt < 3; attempt++)
-            await http.GetStringAsync(Address(app) + "/portal/umbraco/login/login.js", TestContext.Current.CancellationToken);
+        {
+            using var body = new MemoryStream();
+            var context = CreateContext(app, body);
+            context.Request.Path = "/umbraco/login/login.js";
+            await pipeline(context);
+        }
         Assert.Equal(3, logger.Warnings.Count); // Three distinct login patterns, not nine requests/patterns.
         Assert.Equal(3, logger.Warnings.Distinct().Count());
         Assert.All(logger.Warnings, message => Assert.Contains("login.js", message));
-        await app.StopAsync(CancellationToken.None);
     }
 
-    private sealed class TestVersion(int patch) : IUmbracoVersion
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Temporary_middleware_changes_are_undone_even_when_downstream_throws(bool throws)
     {
-        public Version Version => new(18, 3, patch);
+        await using var app = CreateApp();
+        using var body = new MemoryStream();
+        var context = CreateContext(app, body);
+        const string originalPath = "/umbraco/backoffice/hash/css/umb-css.css";
+        context.Request.Path = originalPath;
+        context.Request.Headers.AcceptEncoding = new Microsoft.Extensions.Primitives.StringValues(["gzip", "br"]);
+        var failure = new InvalidOperationException("Downstream failure");
+        app.UseUmbracoPathsUnderPathBase();
+        app.UseBackOfficeAppUnderVirtualPath();
+        app.Run(async request =>
+        {
+            Assert.Equal("/portal" + originalPath, request.Request.Path.Value);
+            Assert.Equal("/portal", request.Request.PathBase.Value);
+            Assert.NotSame(body, request.Response.Body);
+            Assert.Equal(0, request.Request.Headers.AcceptEncoding.Count);
+            await request.Response.WriteAsync("url(/umbraco/backoffice/assets/font.ttf)");
+            if (throws) throw failure;
+        });
+
+        var pipeline = ((IApplicationBuilder)app).Build();
+        if (throws)
+            Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => pipeline(context)));
+        else
+            await pipeline(context);
+
+        Assert.Equal(originalPath, context.Request.Path.Value);
+        Assert.Equal("/portal", context.Request.PathBase.Value);
+        Assert.Equal(new[] { "gzip", "br" }, context.Request.Headers.AcceptEncoding.ToArray());
+        Assert.Same(body, context.Response.Body);
+        Assert.Equal(throws ? "" : "url(../assets/font.ttf)", Encoding.UTF8.GetString(body.ToArray()));
+    }
+
+    [Theory]
+    [InlineData("/umbraco/management/api/test", "text/html", "GET", false)]
+    [InlineData("/umbraco/delivery/api/test", "text/html", "GET", false)]
+    [InlineData("/umbraco/serverEventHub", "text/event-stream", "GET", false)]
+    [InlineData("/umbraco/backoffice/unregistered.js", "application/javascript", "GET", false)]
+    [InlineData("/content", "text/html", "GET", false)]
+    [InlineData("/umbraco", "text/html", "POST", false)]
+    [InlineData("/umbraco", "text/html", "GET", true)]
+    public async Task Unrelated_requests_keep_the_original_stream_and_headers(string path, string accept, string method, bool upgrade)
+    {
+        await using var app = CreateApp();
+        using var body = new MemoryStream();
+        var context = CreateContext(app, body);
+        context.Request.Path = path;
+        context.Request.Method = method;
+        context.Request.Headers.Accept = accept;
+        context.Request.Headers.AcceptEncoding = "gzip";
+        if (upgrade) context.Request.Headers.Upgrade = "websocket";
+        byte[] bytes = [0x80, 0xff];
+        app.UseBackOfficeAppUnderVirtualPath();
+        app.Run(async request =>
+        {
+            Assert.Same(body, request.Response.Body);
+            Assert.Equal("gzip", request.Request.Headers.AcceptEncoding.ToString());
+            await request.Response.Body.WriteAsync(bytes);
+        });
+
+        await ((IApplicationBuilder)app).Build()(context);
+
+        Assert.Equal(bytes, body.ToArray());
+    }
+
+    [Fact]
+    public async Task Rewritten_content_length_counts_utf8_bytes()
+    {
+        await using var app = CreateApp();
+        using var body = new MemoryStream();
+        var context = CreateContext(app, body);
+        const string html = "<umb-app lang=\"en\">café</umb-app>";
+        app.UseBackOfficeAppUnderVirtualPath();
+        app.Run(async request =>
+        {
+            request.Response.ContentType = "text/html";
+            request.Response.ContentLength = Encoding.UTF8.GetByteCount(html);
+            await request.Response.WriteAsync(html);
+        });
+
+        await ((IApplicationBuilder)app).Build()(context);
+
+        var bytes = body.ToArray();
+        var rewritten = Encoding.UTF8.GetString(bytes);
+        Assert.Contains("server-url=\"http://site.test/portal\"", rewritten);
+        Assert.Contains("café", rewritten);
+        Assert.True(bytes.Length > Encoding.UTF8.GetByteCount(html));
+        Assert.Equal(bytes.LongLength, context.Response.ContentLength);
+    }
+
+    [Theory]
+    [InlineData(false, "umbRefreshTokentenant", true)]
+    [InlineData(false, "umbRefreshToken", false)]
+    [InlineData(true, "__Host-umbRefreshTokentenant", true)]
+    [InlineData(true, "umbRefreshTokentenant", false)]
+    [InlineData(true, "__Host-umbRefreshTokenother", false)]
+    public async Task Session_hint_uses_the_configured_cookie_name_and_https_prefix(bool https, string cookie, bool restore)
+    {
+        await using var app = CreateApp(configure: services =>
+        {
+#pragma warning disable CS0618
+            services.Configure<BackOfficeTokenCookieSettings>(options => options.SiteName = "tenant");
+#pragma warning restore CS0618
+        });
+        using var body = new MemoryStream();
+        var context = CreateContext(app, body);
+        context.Request.Scheme = https ? "https" : "http";
+        context.Request.Headers.Cookie = cookie + "=opaque";
+        await AssertSessionHintAsync(app, context, body, restore);
+    }
+
+    [Theory]
+    [InlineData(SameSiteMode.Lax, false)]
+    [InlineData(SameSiteMode.Lax, true)]
+    [InlineData(SameSiteMode.None, false)]
+    [InlineData(SameSiteMode.None, true)]
+    public async Task Non_strict_cross_site_navigation_relies_on_cookie_presence(SameSiteMode sameSite, bool cookie)
+    {
+        await using var app = CreateApp(configure: services =>
+        {
+#pragma warning disable CS0618
+            services.Configure<BackOfficeTokenCookieSettings>(options => options.SameSite = sameSite.ToString());
+#pragma warning restore CS0618
+        });
+        using var body = new MemoryStream();
+        var context = CreateContext(app, body);
+        context.Request.Scheme = "https";
+        context.Request.Headers["Sec-Fetch-Site"] = "cross-site";
+        if (cookie) context.Request.Headers.Cookie = "__Host-umbRefreshToken=opaque";
+        await AssertSessionHintAsync(app, context, body, cookie);
+    }
+
+    private static async Task AssertSessionHintAsync(WebApplication app, HttpContext context, MemoryStream body, bool restore)
+    {
+        app.UseBackOfficeAppUnderVirtualPath();
+        app.Run(request =>
+        {
+            request.Response.ContentType = "text/html";
+            return request.Response.WriteAsync("<umb-app lang=\"en\"></umb-app>");
+        });
+        await ((IApplicationBuilder)app).Build()(context);
+        Assert.Equal(restore, Encoding.UTF8.GetString(body.ToArray()).Contains("data-restore-session"));
+        Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
+    }
+
+    private static DefaultHttpContext CreateContext(WebApplication app, Stream body)
+    {
+        var context = new DefaultHttpContext { RequestServices = app.Services };
+        context.Response.Body = body;
+        context.Request.Method = "GET";
+        context.Request.Scheme = "http";
+        context.Request.Host = new HostString("site.test");
+        context.Request.PathBase = "/portal";
+        context.Request.Path = "/umbraco";
+        context.Request.Headers.Accept = "text/html";
+        return context;
+    }
+
+    private sealed class TestVersion(Version version) : IUmbracoVersion
+    {
+        public Version Version => version;
         public string Comment => "";
         public Version AssemblyVersion => Version;
         public Version AssemblyFileVersion => Version;
-        public SemVersion SemanticVersion => new(18, 3, patch);
+        public SemVersion SemanticVersion => new(version.Major, version.Minor, version.Build);
     }
 
     private sealed class RecordedLogs : ILoggerProvider, ILogger
@@ -183,7 +342,7 @@ public sealed class MiddlewareTests
         public void Dispose() { }
     }
 
-    private static WebApplication CreateApp(ILoggerProvider? logger = null)
+    private static WebApplication CreateApp(ILoggerProvider? logger = null, Action<IServiceCollection>? configure = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -195,6 +354,7 @@ public sealed class MiddlewareTests
         builder.Services.Configure<BackOfficeTokenCookieSettings>(options => { options.SameSite = "Strict"; options.SiteName = ""; });
 #pragma warning restore CS0618
         builder.Services.AddResponseCompression();
+        configure?.Invoke(builder.Services);
         return builder.Build();
     }
 

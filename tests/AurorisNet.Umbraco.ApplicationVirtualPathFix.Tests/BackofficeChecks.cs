@@ -63,7 +63,7 @@ public sealed partial class SiteEndToEndTests
         }
     }
 
-    private static async Task CheckPatchedAssetsAsync(IPage page, TestSite site, CancellationToken ct)
+    private static async Task CheckServerContextAsync(IPage page, TestSite site)
     {
         var serverUrl = await page.EvaluateAsync<string>("""
             async () => {
@@ -74,6 +74,10 @@ public sealed partial class SiteEndToEndTests
         Assert.Equal(site.Address.GetLeftPart(UriPartial.Authority) + site.Options.Prefix, serverUrl);
         if (!site.Options.WebSockets)
             await AssertServerSentEventsAsync(page, "serverEventHub");
+    }
+
+    private static async Task CheckPatchedAssetsAsync(IPage page, TestSite site, CancellationToken ct)
+    {
         await using var assets = new AssetPatchTests.Assets();
         var root = site.Services.GetRequiredService<IBackOfficePathGenerator>().BackOfficeAssetsPath;
         var paths = assets.ModulePaths().Select(path => root + path[BackOfficeAssetPatches.AssetsRoot.Length..]).ToArray();

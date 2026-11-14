@@ -18,7 +18,7 @@ jobs:
   release:
     name: Test and publish
     runs-on: windows-latest
-    # The end-to-end suite boots eight starter-kit sites in Chromium.
+    # One full browser journey and four focused hosting cases, each with its own site.
     timeout-minutes: 45
     permissions:
       contents: write
@@ -59,11 +59,14 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: dotnet build "$env:TEST_PROJECT" -c Release -p:Version=$env:RELEASE_VERSION
 
+      - name: Test asset compatibility and middleware
+        run: dotnet test --project "$env:TEST_PROJECT" -c Release --no-build -- --filter-not-class '*SiteEndToEndTests'
+
       - name: Install Chromium
         run: ./tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Release/net10.0/playwright.ps1 install chromium
 
-      - name: Test the backoffice on Kestrel
-        run: dotnet test --project "$env:TEST_PROJECT" -c Release --no-build
+      - name: Test affected features and hosting cases
+        run: dotnet test --project "$env:TEST_PROJECT" -c Release --no-build -- --filter-class '*SiteEndToEndTests'
 
       - name: Upload browser and server diagnostics
         if: always()

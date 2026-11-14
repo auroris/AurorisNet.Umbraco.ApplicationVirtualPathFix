@@ -52,6 +52,20 @@ Describe 'Release revision selection' {
         { & $script -BranchName 'umbraco/18.3.1' -Commit $commit } | Should -Throw '*not the tip*'
     }
 
+    It 'allocates the last supported revision' {
+        Invoke-Git tag v18.3.1.65533
+        $commit = New-Commit
+        Invoke-Git update-ref refs/remotes/origin/umbraco/18.3.1 $commit
+        (& $script -BranchName 'umbraco/18.3.1' -Commit $commit).Version | Should -Be '18.3.1.65534'
+    }
+
+    It 'refuses a revision beyond the assembly version limit' {
+        Invoke-Git tag v18.3.1.65534
+        $commit = New-Commit
+        Invoke-Git update-ref refs/remotes/origin/umbraco/18.3.1 $commit
+        { & $script -BranchName 'umbraco/18.3.1' -Commit $commit } | Should -Throw '*assembly version limit*'
+    }
+
     It 'reuses a tagged revision when retrying after a newer release' {
         Invoke-Git tag v18.3.1.4
         $newer = New-Commit

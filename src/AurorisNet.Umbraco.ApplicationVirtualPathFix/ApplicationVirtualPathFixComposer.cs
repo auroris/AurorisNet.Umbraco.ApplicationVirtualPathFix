@@ -118,7 +118,7 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
             Name, expected, actual);
     }
 
-    private sealed class VirtualPathImportMapService(IPackageManifestService inner, IBackOfficePathGenerator paths) : IPackageManifestService
+    internal sealed class VirtualPathImportMapService(IPackageManifestService inner, IBackOfficePathGenerator paths) : IPackageManifestService
     {
         private const string BackOfficeAssets = "/umbraco/backoffice";
 
