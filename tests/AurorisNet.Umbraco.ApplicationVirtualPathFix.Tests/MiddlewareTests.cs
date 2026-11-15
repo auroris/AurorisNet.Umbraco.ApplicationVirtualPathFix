@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.Logging.Abstractions;
 using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Core.Configuration;
 using Umbraco.Cms.Core.Semver;
@@ -11,7 +12,7 @@ using Umbraco.Cms.Web.Common.Hosting;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
-public sealed class MiddlewareTests
+public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixture<AssetPatchTests.Assets>
 {
     public enum CompressionOrder { None, Before, After }
 
@@ -41,32 +42,40 @@ public sealed class MiddlewareTests
     public async Task Rewrites_remain_valid_with_response_compression(CompressionOrder compression)
     {
         await using var app = CreateApp();
+        app.Environment.WebRootFileProvider = new BackOfficeAssetFileProvider(assets.Files, new Paths(), "/portal", NullLogger.Instance);
         app.UsePathBase("/portal");
         if (compression == CompressionOrder.Before) app.UseResponseCompression();
+        app.UseUmbracoPathsUnderPathBase();
         app.UseBackOfficeAppUnderVirtualPath();
         if (compression == CompressionOrder.After) app.UseResponseCompression();
+        app.UseUmbracoBackOfficeRewrites();
+        app.UseStaticFiles();
         app.Run(async context =>
         {
-            context.Response.ContentType = context.Request.Path.Value!.EndsWith(".js") ? "application/javascript" : "text/html";
-            await context.Response.WriteAsync(context.Request.Path.Value.EndsWith(".js")
-                ? "new Request(\"/umbraco/test\"); const r = window.location.origin, o = new Rt(e, r); const x = {backofficePath: \"/umbraco\"};"
-                : "<umb-app lang=\"en\"></umb-app>");
+            context.Response.ContentType = "text/html";
+            await context.Response.WriteAsync("<umb-app lang=\"en\"></umb-app>");
         });
         await app.StartAsync(TestContext.Current.CancellationToken);
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Accept.ParseAdd("text/html");
         http.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip");
-        foreach (var path in new[] { "/portal/umbraco", "/portal/umbraco/login/login.js" })
+        foreach (var (path, expected) in new[]
+        {
+            ("/portal/umbraco", "backoffice-path=\"/portal/umbraco\""),
+            ("/portal/umbraco/login/login.js", "umbHttpClient.setConfig"),
+            ("/portal/umbraco/backoffice/hash/packages/core/manifests.js", "/portal/umbraco/backoffice/hash/"),
+            ("/portal/umbraco/backoffice/hash/css/umb-css.css", "url(../assets/"),
+        })
         {
             using var response = await http.GetAsync(Address(app) + path, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal(compression == CompressionOrder.Before, response.Content.Headers.ContentEncoding.Contains("gzip"));
+            var compressed = compression == CompressionOrder.Before || (compression == CompressionOrder.After && path != "/portal/umbraco");
+            Assert.Equal(compressed, response.Content.Headers.ContentEncoding.Contains("gzip"));
             await using var stream = await response.Content.ReadAsStreamAsync(TestContext.Current.CancellationToken);
-            using var reader = new StreamReader(compression == CompressionOrder.Before
+            using var reader = new StreamReader(compressed
                 ? new GZipStream(stream, CompressionMode.Decompress) : stream);
             var body = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
-            Assert.Contains(path.EndsWith(".js") ? "umbHttpClient.setConfig" : "backoffice-path=\"/portal/umbraco\"", body);
-            Assert.Contains("/portal", body);
+            Assert.Contains(expected, body);
         }
         await app.StopAsync(CancellationToken.None);
     }
@@ -104,13 +113,14 @@ public sealed class MiddlewareTests
             else
             {
                 context.Response.Headers.ContentEncoding = "gzip";
-                context.Response.ContentType = "application/javascript";
+                context.Response.ContentType = "text/html";
                 await context.Response.Body.WriteAsync(encoded);
             }
         });
         await app.StartAsync(TestContext.Current.CancellationToken);
         using var http = new HttpClient();
-        var url = Address(app) + "/portal/umbraco/login/login.js";
+        http.DefaultRequestHeaders.Accept.ParseAdd("text/html");
+        var url = Address(app) + "/portal/umbraco";
         Assert.Equal(encoded, await http.GetByteArrayAsync(url, TestContext.Current.CancellationToken));
         http.DefaultRequestHeaders.IfNoneMatch.ParseAdd("\"test\"");
         using var response = await http.GetAsync(url, TestContext.Current.CancellationToken);
@@ -138,26 +148,6 @@ public sealed class MiddlewareTests
         }
     }
 
-    [Fact]
-    public async Task Missing_patterns_are_logged_once_each_across_requests()
-    {
-        using var logger = new RecordedLogs();
-        await using var app = CreateApp(logger);
-        app.UseBackOfficeAppUnderVirtualPath();
-        app.Run(context => context.Response.WriteAsync("/* upstream changed */"));
-        var pipeline = ((IApplicationBuilder)app).Build();
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            using var body = new MemoryStream();
-            var context = CreateContext(app, body);
-            context.Request.Path = "/umbraco/login/login.js";
-            await pipeline(context);
-        }
-        Assert.Equal(3, logger.Warnings.Count); // Three distinct login patterns, not nine requests/patterns.
-        Assert.Equal(3, logger.Warnings.Distinct().Count());
-        Assert.All(logger.Warnings, message => Assert.Contains("login.js", message));
-    }
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -166,7 +156,7 @@ public sealed class MiddlewareTests
         await using var app = CreateApp();
         using var body = new MemoryStream();
         var context = CreateContext(app, body);
-        const string originalPath = "/umbraco/backoffice/hash/css/umb-css.css";
+        const string originalPath = "/umbraco/basic-auth";
         context.Request.Path = originalPath;
         context.Request.Headers.AcceptEncoding = new Microsoft.Extensions.Primitives.StringValues(["gzip", "br"]);
         var failure = new InvalidOperationException("Downstream failure");
@@ -178,7 +168,8 @@ public sealed class MiddlewareTests
             Assert.Equal("/portal", request.Request.PathBase.Value);
             Assert.NotSame(body, request.Response.Body);
             Assert.Equal(0, request.Request.Headers.AcceptEncoding.Count);
-            await request.Response.WriteAsync("url(/umbraco/backoffice/assets/font.ttf)");
+            request.Response.ContentType = "text/html";
+            await request.Response.WriteAsync("<form action=\"/portal/portal/umbraco/basic-auth\"></form>");
             if (throws) throw failure;
         });
 
@@ -192,7 +183,7 @@ public sealed class MiddlewareTests
         Assert.Equal("/portal", context.Request.PathBase.Value);
         Assert.Equal(new[] { "gzip", "br" }, context.Request.Headers.AcceptEncoding.ToArray());
         Assert.Same(body, context.Response.Body);
-        Assert.Equal(throws ? "" : "url(../assets/font.ttf)", Encoding.UTF8.GetString(body.ToArray()));
+        Assert.Equal(throws ? "" : "<form action=\"/portal/umbraco/basic-auth\"></form>", Encoding.UTF8.GetString(body.ToArray()));
     }
 
     [Theory]
@@ -200,15 +191,21 @@ public sealed class MiddlewareTests
     [InlineData("/umbraco/delivery/api/test", "text/html", "GET", false)]
     [InlineData("/umbraco/serverEventHub", "text/event-stream", "GET", false)]
     [InlineData("/umbraco/backoffice/unregistered.js", "application/javascript", "GET", false)]
+    [InlineData("/umbraco/backoffice/css/umb-css.css", "text/html", "GET", false)]
+    [InlineData("/umbraco/umbraco/backoffice/hash/css/umb-css.css", "text/html", "GET", false, "/umbraco")]
+    [InlineData("/umbraco/login/login.js", "text/html", "GET", false)]
+    [InlineData("/umbraco/website/nonodes.css", "text/html", "GET", false)]
     [InlineData("/content", "text/html", "GET", false)]
     [InlineData("/umbraco", "text/html", "POST", false)]
     [InlineData("/umbraco", "text/html", "GET", true)]
-    public async Task Unrelated_requests_keep_the_original_stream_and_headers(string path, string accept, string method, bool upgrade)
+    public async Task Unrelated_requests_keep_the_original_stream_and_headers(
+        string path, string accept, string method, bool upgrade, string prefix = "/portal")
     {
-        await using var app = CreateApp();
+        await using var app = CreateApp(configure: services => services.AddSingleton<IBackOfficePathGenerator>(new Paths(prefix)));
         using var body = new MemoryStream();
         var context = CreateContext(app, body);
         context.Request.Path = path;
+        context.Request.PathBase = prefix;
         context.Request.Method = method;
         context.Request.Headers.Accept = accept;
         context.Request.Headers.AcceptEncoding = "gzip";
@@ -342,12 +339,11 @@ public sealed class MiddlewareTests
         public void Dispose() { }
     }
 
-    private static WebApplication CreateApp(ILoggerProvider? logger = null, Action<IServiceCollection>? configure = null)
+    private static WebApplication CreateApp(Action<IServiceCollection>? configure = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
-        if (logger is not null) builder.Logging.AddProvider(logger);
         builder.Services.AddSingleton<IBackOfficePathGenerator, Paths>();
         builder.Services.Configure<GlobalSettings>(options => options.UseHttps = false);
 #pragma warning disable CS0618
@@ -361,9 +357,9 @@ public sealed class MiddlewareTests
     private static string Address(WebApplication app)
         => app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
 
-    private sealed class Paths : IBackOfficePathGenerator
+    private sealed class Paths(string prefix = "/portal") : IBackOfficePathGenerator
     {
-        public string BackOfficePath => "/portal/umbraco";
+        public string BackOfficePath => prefix + "/umbraco";
         public string BackOfficeVirtualDirectory => BackOfficePath + "/backoffice";
         public string BackOfficeCacheBustHash => "hash";
         public string BackOfficeAssetsPath => BackOfficeVirtualDirectory + "/" + BackOfficeCacheBustHash;

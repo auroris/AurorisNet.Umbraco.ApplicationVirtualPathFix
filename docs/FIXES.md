@@ -46,11 +46,15 @@ behavior remain explicit patches. Compatibility tests check every registered
 bundle and search pattern against the installed Umbraco assets, including bundles
 the browser scenarios do not load.
 
-The package buffers only the responses it may rewrite: browser navigations under
-`/umbraco` outside the backoffice assets and the management and delivery APIs, the
-slim login script, the backoffice modules and stylesheets listed above and the built-in pages'
-stylesheet. Everything else, including SignalR's WebSocket, Server-Sent Events and
-long-polling transports, static files and API calls, streams through untouched.
+At startup, a file provider reads those installed assets and prepares patched
+copies in memory. Umbraco's static-file middleware serves them at their original
+URLs, with lengths and cache validators for the patched content. The original
+files stay unchanged. Restart the site after changing an upstream asset or patch.
+
+The response middleware buffers only backoffice and login HTML pages, whose URLs
+and session hints depend on the request. JavaScript, CSS, API calls and SignalR's
+WebSocket, Server-Sent Events and long-polling transports pass through that
+middleware without buffering or changes to `Accept-Encoding`.
 
 ## Hosting and compatibility
 
@@ -59,8 +63,8 @@ on exactly `18.3.1` of `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`, 
 upgrading a site's Umbraco without the matching package release makes restore fail
 with a version conflict (NU1107). Upgrade both together. A site that references
 those two packages directly at another version gets only a NuGet warning (NU1608);
-the package then logs a warning at startup, and another for each patch that no
-longer finds its pattern.
+the package then logs a warning at startup. Asset preparation also logs warnings
+for missing or ambiguous bundles and for each patch that no longer finds its pattern.
 
 Requests must reach the site with the prefix still in the path, or with the path
 base already set: by IIS for a child application, or by
@@ -70,12 +74,11 @@ Kestrel uses the same setting to establish the path base. Route only the prefix 
 the site; Kestrel otherwise also answers unprefixed URLs.
 
 An existing host-supplied path base is preserved, including when a content slug
-repeats the application prefix. If using ASP.NET Core response compression, register
-`UseResponseCompression()` **before** `UseUmbraco()` so patched assets are compressed
-after rewriting. For the small set of responses it buffers, the package suppresses
-compression registered later in the pipeline. Precompressed responses from custom
-handlers are passed through unchanged; those handlers must provide uncompressed
-versions of assets that need rewriting.
+repeats the application prefix. Patched static files use normal ASP.NET Core response
+compression. Register `UseResponseCompression()` **before** `UseUmbraco()` to also
+compress the rewritten HTML pages. For those pages only, the package suppresses
+compression registered later in the pipeline. Precompressed HTML from custom
+handlers passes through unchanged.
 
 Under a virtual path, `server-url` comes from the request's scheme and host. Behind
 a reverse proxy or load balancer, apply `X-Forwarded-Proto` and `X-Forwarded-Host`
@@ -127,12 +130,15 @@ The `full` case:
 
 The other cases reuse only the steps relevant to their hosting risks; they do not
 repeat the front-end crawl, email, editor, stylesheet or media-upload journey.
-Focused middleware tests cover response-compression ordering, conditional responses,
+File-provider tests check the prepared bytes, lengths, HEAD requests, conditional
+responses and byte ranges through the real static-file middleware. Focused
+middleware tests cover response-compression ordering, conditional responses,
 precompressed content, request and stream restoration, pass-through responses and
-session hints with custom cookie settings. They also check startup version warnings
-and reporting each missing patch only once. URL tests cover prefix boundaries,
-signed queries and fragments, import maps and OAuth callbacks without starting a
-site. The IIS-style case observes an actual EventSource open event
+session hints with custom cookie settings. Middleware tests also check startup
+version warnings; file-provider tests verify that missing patches are reported
+during startup only. URL tests cover prefix boundaries, signed queries and fragments,
+import maps and OAuth callbacks without starting a site. The IIS-style case observes
+an actual EventSource open event
 for both the backoffice server-events hub and the preview hub. Each site has image
 signing enabled with a fresh test key.
 

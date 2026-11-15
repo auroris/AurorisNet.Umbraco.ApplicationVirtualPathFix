@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -50,7 +51,13 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
             {
                 WarnOnUmbracoVersionMismatch(app.ApplicationServices);
                 if (VirtualPathHosting.Prefix(app.ApplicationServices.GetRequiredService<IHostingEnvironment>()) is { } prefix)
+                {
+                    var environment = app.ApplicationServices.GetRequiredService<IWebHostEnvironment>();
+                    environment.WebRootFileProvider = new BackOfficeAssetFileProvider(environment.WebRootFileProvider,
+                        app.ApplicationServices.GetRequiredService<IBackOfficePathGenerator>(), prefix,
+                        app.ApplicationServices.GetRequiredService<ILoggerFactory>().CreateLogger(Name));
                     app.UseWhen(context => !context.Request.PathBase.HasValue, branch => branch.UsePathBase(prefix));
+                }
                 app.UseUmbracoPathsUnderPathBase();
                 app.UseBackOfficeAppUnderVirtualPath();
             },

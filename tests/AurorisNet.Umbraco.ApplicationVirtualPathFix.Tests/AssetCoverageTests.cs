@@ -20,13 +20,15 @@ public sealed class AssetCoverageTests(AssetPatchTests.Assets assets) : IClassFi
             var source = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
             if (!references.IsMatch(source)) continue;
             examined++;
+            var module = path.StartsWith(BackOfficeAssetPatches.AssetsRoot + "/", StringComparison.Ordinal)
+                ? BackOfficeAssetPatches.NormalizeModulePath(path[BackOfficeAssetPatches.AssetsRoot.Length..]) : "";
             if (path == diagnosticModule)
             {
                 // Allow only the known diagnostic constant, not other URLs added to this file.
                 source = source.Replace("const U = \"/umbraco/backoffice/\";", "", StringComparison.Ordinal);
             }
-            else if (BackOfficeAssetPatches.TryGetModule(path, AssetsPath, out var module))
-                source = BackOfficeAssetPatches.PatchModule(module!, source, AssetsPath, Missing);
+            else if (BackOfficeAssetPatches.Modules.Contains(module))
+                source = BackOfficeAssetPatches.PatchModule(module, source, AssetsPath, Missing);
             else if (path == "/umbraco/website/nonodes.css")
                 source = BackOfficeAssetPatches.PatchWebsiteStyles(source, Missing);
             else if (path == "/umbraco/login/login.js")
@@ -68,8 +70,8 @@ public sealed class AssetCoverageTests(AssetPatchTests.Assets assets) : IClassFi
             if (!consumer.IsMatch(source)) continue;
             examined++;
             var module = BackOfficeAssetPatches.NormalizeModulePath(path[BackOfficeAssetPatches.AssetsRoot.Length..]);
-            if (BackOfficeAssetPatches.TryGetModule(path, AssetsPath, out var patchedModule))
-                BackOfficeAssetPatches.PatchModule(patchedModule!, source, AssetsPath, Missing);
+            if (BackOfficeAssetPatches.Modules.Contains(module))
+                BackOfficeAssetPatches.PatchModule(module, source, AssetsPath, Missing);
             else if (!reviewed.ContainsKey(module))
                 unexpected.Add($"{module}: unreviewed server URL consumer");
         }

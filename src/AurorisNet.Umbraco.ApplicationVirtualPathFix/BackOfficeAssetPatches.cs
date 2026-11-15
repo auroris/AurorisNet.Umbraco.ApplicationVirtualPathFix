@@ -55,23 +55,6 @@ internal static partial class BackOfficeAssetPatches
     // Preserve the distinction between stable files and hashed chunks sharing the same stem.
     internal static string NormalizeModulePath(string path) => BundleHash().Replace(path, "-????????");
 
-    internal static bool TryGetModule(PathString path, PathString assetsPath, out string? module)
-    {
-        module = null;
-        // The earlier path middleware restores the virtual path on cache-busted requests.
-        // Unhashed requests retain the unprefixed path used by the static-file handler.
-        if (!path.StartsWithSegments(assetsPath, out var relative)
-            && !path.StartsWithSegments(AssetsRoot, out relative))
-            return false;
-
-        var candidate = NormalizeModulePath(relative.Value ?? "");
-        if (!AssetUrlModules.Contains(candidate) && !CodePatches.ContainsKey(candidate))
-            return false;
-
-        module = candidate;
-        return true;
-    }
-
     internal static string PatchModule(string module, string source, string assetsPath, Action<string, string> missing)
     {
         if (AssetUrlModules.Contains(module))

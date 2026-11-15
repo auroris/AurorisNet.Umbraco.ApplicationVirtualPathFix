@@ -36,21 +36,17 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     }
 
     [Theory]
-    [InlineData("/portal/umbraco/backoffice/cache-hash/packages/tiptap/input-tiptap.element-Ab12_-Xy.js", "/packages/tiptap/input-tiptap.element-????????.js")]
-    [InlineData("/portal/umbraco/backoffice/cache-hash/packages/tiptap/input-tiptap.element-Z9y8X7w6.js", "/packages/tiptap/input-tiptap.element-????????.js")]
-    [InlineData("/umbraco/backoffice/packages/tiptap/input-tiptap.element-Ab12_-Xy.js", "/packages/tiptap/input-tiptap.element-????????.js")]
-    [InlineData("/umbraco/backoffice/packages/tiptap/input-tiptap.element.js", null)]
-    [InlineData("/umbraco/backoffice/packages/core/manifests.js", "/packages/core/manifests.js")]
-    [InlineData("/umbraco/backoffice/packages/core/manifests-Ab12_-Xy.js", null)]
-    [InlineData("/portal/umbraco/backoffice/cache-hash-other/packages/tiptap/input-tiptap.element-Ab12_-Xy.js", null)]
-    [InlineData("/umbraco/backoffice/packages/other/input-tiptap.element-Ab12_-Xy.js", null)]
-    [InlineData("/umbraco/backoffice/packages/tiptap/input-tiptap.element-Ab12_Xy.js", null)]
-    [InlineData("/umbraco/backoffice/packages/tiptap/input-tiptap.element-Ab12_-Xy.js.map", null)]
-    [InlineData("/App_Plugins/example/input-tiptap.element-Ab12_-Xy.js", null)]
-    public void Module_matching_keeps_the_directory_and_stem_exact(string path, string? expected)
+    [InlineData("/packages/tiptap/input-tiptap.element-Ab12_-Xy.js", "/packages/tiptap/input-tiptap.element-????????.js")]
+    [InlineData("/packages/tiptap/input-tiptap.element-Z9y8X7w6.js", "/packages/tiptap/input-tiptap.element-????????.js")]
+    [InlineData("/packages/tiptap/input-tiptap.element.js", "/packages/tiptap/input-tiptap.element.js")]
+    [InlineData("/packages/core/manifests.js", "/packages/core/manifests.js")]
+    [InlineData("/packages/other/input-tiptap.element-Ab12_-Xy.js", "/packages/other/input-tiptap.element-????????.js")]
+    [InlineData("/packages/tiptap/input-tiptap.element-Ab12_Xy.js", "/packages/tiptap/input-tiptap.element-Ab12_Xy.js")]
+    [InlineData("/packages/tiptap/input-tiptap.element-Ab12_Xy99.js", "/packages/tiptap/input-tiptap.element-Ab12_Xy99.js")]
+    [InlineData("/packages/tiptap/input-tiptap.element-Ab12_-Xy.js.map", "/packages/tiptap/input-tiptap.element-Ab12_-Xy.js.map")]
+    public void Bundle_normalization_replaces_only_the_eight_character_hash(string path, string expected)
     {
-        Assert.Equal(expected is not null, BackOfficeAssetPatches.TryGetModule(path, AssetsPath, out var module));
-        Assert.Equal(expected, module);
+        Assert.Equal(expected, BackOfficeAssetPatches.NormalizeModulePath(path));
     }
 
     [Fact]
@@ -173,7 +169,8 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
         }
 
         public string[] ModulePaths() => Enumerate(BackOfficeAssetPatches.AssetsRoot)
-            .Where(asset => BackOfficeAssetPatches.TryGetModule(asset.Path, AssetsPath, out _))
+            .Where(asset => BackOfficeAssetPatches.Modules.Contains(
+                BackOfficeAssetPatches.NormalizeModulePath(asset.Path[BackOfficeAssetPatches.AssetsRoot.Length..])))
             .Select(asset => asset.Path).ToArray();
 
         public ValueTask DisposeAsync() => _app.DisposeAsync();
