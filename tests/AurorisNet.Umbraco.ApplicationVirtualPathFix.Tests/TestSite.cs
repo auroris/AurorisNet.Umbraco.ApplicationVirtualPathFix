@@ -76,8 +76,9 @@ internal sealed class TestSite : IAsyncDisposable
     /// <summary>An absolute URL for a path relative to the application, such as <c>/umbraco</c>.</summary>
     public Uri Url(string path) => new(Address, Options.Prefix + path);
 
-    public HttpClient CreateHttpClient() => new(new HttpClientHandler
+    public HttpClient CreateHttpClient(bool followRedirects = true) => new(new HttpClientHandler
     {
+        AllowAutoRedirect = followRedirects,
         ServerCertificateCustomValidationCallback = (request, _, _, errors) =>
             errors == SslPolicyErrors.None || request.RequestUri?.Authority == Address.Authority,
     });

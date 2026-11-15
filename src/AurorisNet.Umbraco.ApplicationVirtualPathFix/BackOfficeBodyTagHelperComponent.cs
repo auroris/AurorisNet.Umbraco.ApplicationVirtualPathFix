@@ -47,8 +47,9 @@ internal sealed class BackOfficeBodyTagHelperComponent(
                 attributes.Append("data-restore-session ");
             if (request.PathBase.HasValue)
             {
-                var serverUrl = $"{request.Scheme}://{request.Host}{request.PathBase}";
-                attributes.Append($"server-url=\"{HtmlEncoder.Default.Encode(serverUrl)}\" ");
+                // Only the path base: auth.js adds the origin the browser loaded the page from, as Umbraco itself
+                // does at the root, so the backoffice depends on neither the Host header nor forwarded headers.
+                attributes.Append($"data-path-base=\"{HtmlEncoder.Default.Encode(request.PathBase.ToString())}\" ");
                 attributes.Append($"backoffice-path=\"{HtmlEncoder.Default.Encode(paths.BackOfficePath)}\" ");
             }
             patched = html.Replace("<umb-app ", "<umb-app " + attributes, StringComparison.Ordinal);

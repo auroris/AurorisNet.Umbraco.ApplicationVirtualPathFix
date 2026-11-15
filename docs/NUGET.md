@@ -15,6 +15,8 @@ session renewal stay under the site's application path.
 - **Restores existing sessions.** Umbraco renews its token when a session may exist.
   A fresh browser starts sign-in directly, avoiding the initial token-refresh errors.
   This also applies to sites hosted at the root.
+- **Reports its status in the backoffice.** A health check under Settings → Health
+  Check shows whether every fix applied and how requests reach the site.
 
 ## Quick start
 

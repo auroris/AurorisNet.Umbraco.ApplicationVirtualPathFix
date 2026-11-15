@@ -96,6 +96,10 @@ and SameSite modes. Middleware checks cover request-path restoration and version
 warnings. `DecoratorTests` fails if the package leaves a member of an Umbraco interface
 to its default implementation. Umbraco adds members that way, and a decorator written
 before the member existed would otherwise run the default instead of forwarding.
+`HealthCheckTests` covers the health check's results for a site at the root, a
+working site under a virtual path, and a site with a different Umbraco version, a
+missing path base, an unapplied change and requests outside the virtual path. The
+`full` browser case runs the check through the management API.
 
 `AssetFileProviderTests` checks that startup prepares patched copies without changing
 the original files, and that repeated reads neither repeat patching nor log more
@@ -148,7 +152,10 @@ dotnet pack src/AurorisNet.Umbraco.ApplicationVirtualPathFix -c Release -o artif
 Local builds use version `18.3.1.0`. Revision 0 is never published, so a local
 package cannot be confused with a release in NuGet's cache. The release workflow
 supplies its selected revision as the MSBuild `Version` property when building and
-packing.
+packing. The assembly embeds its symbols and generated sources, and Source Link points
+them at the commit on GitHub, so a site's debugger can step into the package.
+`ContinuousIntegrationBuild`, which the release workflow sets, keeps the paths in them
+deterministic.
 
 ## Publish a revision
 

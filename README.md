@@ -30,6 +30,8 @@ registers its fixes through Umbraco's composer and middleware pipeline.
 - **Restore an existing session.** Umbraco renews its token when a session may
   exist. A fresh browser starts sign-in directly, avoiding the initial
   token-refresh errors. This fix also applies to sites hosted at the root.
+- **Report its status in the backoffice.** A health check under Settings → Health
+  Check shows whether every fix applied and how requests reach the site.
 
 This branch targets **Umbraco 18.3.1 and .NET 10**. The package requires that exact
 Umbraco version because some fixes modify the served upstream JavaScript.

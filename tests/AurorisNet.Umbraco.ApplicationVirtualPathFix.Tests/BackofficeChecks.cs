@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Playwright;
 using Umbraco.Cms.Web.Common.Hosting;
+using Umbraco.Cms.Core.HealthChecks;
 using Umbraco.Cms.Core.Services;
 using static Microsoft.Playwright.Assertions;
 
@@ -79,6 +80,27 @@ public sealed partial class SiteEndToEndTests
                 }
                 """, new { id = dataType.Key.ToString(), json = original.GetRawText() });
         }
+    }
+
+    private static async Task CheckHealthAsync(IPage page, TestSite site)
+    {
+        // Registered once, whether or not Umbraco's own type scan also finds it.
+        Assert.Single(site.Services.GetRequiredService<HealthCheckCollection>(), check => check is VirtualPathHealthCheck);
+        // Run as the backoffice's Health Check dashboard does.
+        var results = await page.EvaluateAsync<JsonElement>("""
+            async id => {
+              const { HealthCheckService } = await import('@umbraco-cms/backoffice/external/backend-api');
+              const { data, error } = await HealthCheckService.postHealthCheckGroupByNameCheck({ path: { name: 'Configuration' } });
+              if (error) throw new Error(JSON.stringify(error));
+              return data.checks.find(check => check.id.toLowerCase() === id)?.results ?? null;
+            }
+            """, VirtualPathHealthCheck.CheckId);
+        Assert.True(results.ValueKind == JsonValueKind.Array, "The Configuration group must include the application virtual path check.");
+        var statuses = results.EnumerateArray()
+            .Select(result => (Type: result.GetProperty("resultType").GetString(), Message: result.GetProperty("message").GetString()!)).ToArray();
+        Assert.Equal(4, statuses.Length);
+        Assert.All(statuses, status => Assert.True(status.Type == "Success", $"{status.Type}: {status.Message}"));
+        Assert.Contains(statuses, status => status.Message.Contains($"runs under {site.Options.Prefix},", StringComparison.Ordinal));
     }
 
     private static async Task AssertImageLoadsAsync(ILocator image, string url)

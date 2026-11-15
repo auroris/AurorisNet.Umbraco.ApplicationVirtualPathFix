@@ -20,7 +20,8 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
     private readonly IFileProvider _inner;
     private readonly Dictionary<string, IFileInfo> _patched = new(StringComparer.OrdinalIgnoreCase);
 
-    public BackOfficeAssetFileProvider(IFileProvider inner, IBackOfficePathGenerator paths, string prefix, ILogger logger)
+    public BackOfficeAssetFileProvider(IFileProvider inner, IBackOfficePathGenerator paths, string prefix, ILogger logger,
+        VirtualPathStatus? status = null)
     {
         _inner = inner;
         var context = new BackOfficeAssetPatches.PatchContext(prefix, paths.BackOfficePath, paths.BackOfficeAssetsPath);
@@ -31,6 +32,7 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
             {
                 logger.LogWarning("Expected one Umbraco file for {Path}, found {Count}. The application virtual path fix cannot patch it.",
                     patch.Path, files.Length);
+                status?.Problem($"Expected one Umbraco file for {patch.Path}, found {files.Length}, so it is not patched.");
                 continue;
             }
 
@@ -43,12 +45,16 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
             // from a newer Umbraco file or package, and a different application path changes the URL instead.
             _patched.Add(path, new PatchedFile(file.Name, bytes, file.LastModified > SourceTimestamp ? file.LastModified : SourceTimestamp));
         }
+        status?.AssetsPrepared(_patched.Count);
 
         void Unapplied(string resource, string reason)
-            => logger.LogWarning(
+        {
+            logger.LogWarning(
                 "Umbraco's {Resource} {Reason}, so that part of the application virtual path fix is not applied. "
                 + "Install the AurorisNet.Umbraco.ApplicationVirtualPathFix release that matches this site's Umbraco version.",
                 resource, reason);
+            status?.Problem($"Umbraco's {resource} {reason}, so that part of the fix is not applied.");
+        }
     }
 
     public IFileInfo GetFileInfo(string subpath)

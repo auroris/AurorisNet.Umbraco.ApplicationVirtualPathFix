@@ -16,22 +16,25 @@ public sealed class BackOfficeBodyTests
     [InlineData("/portal")]
     [InlineData("/a/b")]
     [InlineData("/a&b")]
-    public async Task Backoffice_attributes_use_the_public_request_and_preserve_existing_markup(string prefix)
+    public async Task Backoffice_attributes_name_the_path_base_and_preserve_existing_markup(string prefix)
     {
         using var services = CreateServices(prefix);
         var context = CreateContext(services, prefix);
         context.Request.Scheme = "https";
         var html = await RenderBodyAsync(context, AppHtml);
         Assert.Contains("lang=\"fr\" keep-user-logged-in>café</umb-app>", html);
+        // The browser supplies the origin, so the Host header never reaches the page.
+        Assert.DoesNotContain("server-url", html);
+        Assert.DoesNotContain("site.test", html);
         if (prefix.Length == 0)
         {
-            Assert.DoesNotContain("server-url", html);
+            Assert.DoesNotContain("data-path-base", html);
             Assert.DoesNotContain("backoffice-path", html);
         }
         else
         {
             var encoded = System.Text.Encodings.Web.HtmlEncoder.Default.Encode(prefix);
-            Assert.Contains($"server-url=\"https://site.test{encoded}\"", html);
+            Assert.Contains($"data-path-base=\"{encoded}\"", html);
             Assert.Contains($"backoffice-path=\"{encoded}/umbraco\"", html);
         }
         Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
@@ -123,7 +126,7 @@ public sealed class BackOfficeBodyTests
         output.PreContent.AppendHtml("<header>Before</header>");
         output.PostContent.AppendHtml("<footer>After</footer>");
         await ProcessAsync(context, BackOfficeView, output);
-        Assert.Contains("server-url=\"http://site.test/portal\"", output.Content.GetContent());
+        Assert.Contains("data-path-base=\"/portal\"", output.Content.GetContent());
         Assert.Contains("<p>Added by another component</p>", output.Content.GetContent());
         Assert.Equal("<header>Before</header>", output.PreContent.GetContent());
         Assert.Equal("<footer>After</footer>", output.PostContent.GetContent());

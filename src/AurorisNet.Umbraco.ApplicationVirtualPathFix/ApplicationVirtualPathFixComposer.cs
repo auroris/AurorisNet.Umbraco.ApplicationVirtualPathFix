@@ -46,6 +46,8 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
     {
         var services = builder.Services;
         services.AddVirtualPathHosting();
+        services.AddSingleton<VirtualPathStatus>();
+        builder.HealthChecks().Add<VirtualPathHealthCheck>();
         services.AddTransient<ITagHelperComponent, BackOfficeBodyTagHelperComponent>();
         services.Configure<UmbracoPipelineOptions>(options => options.PipelineFilters.Insert(0, new UmbracoPipelineFilter(
             Name,
@@ -54,11 +56,18 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
                 WarnOnUmbracoVersionMismatch(app.ApplicationServices);
                 if (VirtualPathHosting.Prefix(app.ApplicationServices.GetRequiredService<IHostingEnvironment>()) is { } prefix)
                 {
+                    var status = app.ApplicationServices.GetRequiredService<VirtualPathStatus>();
                     var environment = app.ApplicationServices.GetRequiredService<IWebHostEnvironment>();
                     environment.WebRootFileProvider = new BackOfficeAssetFileProvider(environment.WebRootFileProvider,
                         app.ApplicationServices.GetRequiredService<IBackOfficePathGenerator>(), prefix,
-                        app.ApplicationServices.GetRequiredService<ILoggerFactory>().CreateLogger(Name));
+                        app.ApplicationServices.GetRequiredService<ILoggerFactory>().CreateLogger(Name), status);
                     app.UseWhen(context => !context.Request.PathBase.HasValue, branch => branch.UsePathBase(prefix));
+                    // Kestrel also answers requests outside the virtual path. The health check reports them.
+                    app.Use((context, next) =>
+                    {
+                        if (!context.Request.PathBase.HasValue) status.RequestOutside(context.Request.Path);
+                        return next(context);
+                    });
                 }
                 app.UseUmbracoPathsUnderPathBase();
             },
@@ -109,13 +118,20 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
         return (TService)ActivatorUtilities.CreateInstance(provider, descriptor.ImplementationType!);
     }
 
-    internal static void WarnOnUmbracoVersionMismatch(IServiceProvider services)
+    /// <summary>The Umbraco version the package was built for, when the site runs another one.</summary>
+    internal static string? MismatchedUmbracoVersion(IUmbracoVersion umbraco)
     {
         var expected = typeof(ApplicationVirtualPathFixComposer).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(attribute => attribute.Key == "UmbracoVersion")?.Value;
-        var actual = services.GetRequiredService<IUmbracoVersion>().SemanticVersion;
-        if (!Version.TryParse(expected, out var built)
-            || (built.Major == actual.Major && built.Minor == actual.Minor && built.Build == actual.Patch))
+        var actual = umbraco.SemanticVersion;
+        return !Version.TryParse(expected, out var built)
+            || (built.Major == actual.Major && built.Minor == actual.Minor && built.Build == actual.Patch) ? null : expected;
+    }
+
+    internal static void WarnOnUmbracoVersionMismatch(IServiceProvider services)
+    {
+        var umbraco = services.GetRequiredService<IUmbracoVersion>();
+        if (MismatchedUmbracoVersion(umbraco) is not { } expected)
             return;
 
         // Restore usually fails first (NU1107), but a site that references Umbraco.Cms.Web.Common or
@@ -123,7 +139,7 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
         services.GetRequiredService<ILoggerFactory>().CreateLogger(Name).LogWarning(
             "{Package} was built for Umbraco {Expected}, but this site runs Umbraco {Actual}. Some of its fixes patch "
             + "that version's backoffice scripts and may not apply. Install the package release for the site's Umbraco version.",
-            Name, expected, actual);
+            Name, expected, umbraco.SemanticVersion);
     }
 
     internal sealed class VirtualPathImportMapService(IPackageManifestService inner, IBackOfficePathGenerator paths) : IPackageManifestService

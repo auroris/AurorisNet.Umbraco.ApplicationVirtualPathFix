@@ -11,7 +11,7 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 |---|---|
 | The backoffice asset rewrite expects the virtual path in `Request.Path`, after the host has moved it into `Request.PathBase`. | Cache-busted asset requests reach Umbraco's script and stylesheet handlers. |
 | Import maps contain root-absolute core and package URLs. | Root-absolute imports and scopes carry the application prefix, and Umbraco can add its asset hash. |
-| The backoffice app builds API and OAuth URLs from the origin and `/umbraco`. | Under a virtual path the served app receives `server-url` and `backoffice-path` values that include the configured path. OAuth callbacks are registered with that prefix. Sites at the root keep Umbraco's defaults. |
+| The backoffice app builds API and OAuth URLs from the origin and `/umbraco`. | Under a virtual path the app's server URL is the browser's origin plus the configured path, and its backoffice path includes the configured path too. OAuth callbacks are registered with that prefix. Sites at the root keep Umbraco's defaults. |
 | A backoffice bookmark uses different casing for the application prefix, which the server accepts but the SPA router does not. | Backoffice HTML navigations redirect to the configured prefix casing, retaining the query string. |
 | The slim login script uses root URLs for login, two-factor verification and its shared API client. | The served script uses the application prefix for those requests, including public package manifests and password resets. |
 | Password-reset and invitation emails link to `/umbraco/login` at the host root. | The emailed links include the application path. |
@@ -31,7 +31,10 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 | The stylesheet of Umbraco's built-in Page Not Found, No Content, Maintenance and Upgrading pages loads its fonts and background from the root. | They load from beside the stylesheet, under the prefix. |
 | Initial authentication attempts a token refresh before a fresh browser has received a refresh cookie. | The auth wrapper starts the normal sign-in flow directly when no session can exist. Existing sessions continue through Umbraco's token validation and renewal. |
 
-The auth wrapper receives only a session hint in the backoffice HTML: whether the
+Under a virtual path the backoffice HTML names its path base, and the auth wrapper
+sets the app's server URL to the origin the browser loaded the page from plus that
+path. Umbraco uses the browser's origin the same way at the root. Apart from that, the
+auth wrapper receives only a session hint in the backoffice HTML: whether the
 refresh cookie was sent, or whether the browser reports that it may have withheld
 it. Umbraco's cookie is `SameSite=Strict` by default, so it is left off navigations
 that another site starts, such as a backoffice link in web mail
@@ -94,10 +97,21 @@ ASP.NET Core response compression. Register `UseResponseCompression()` before th
 static-file and MVC handlers, normally before `UseUmbraco()`. The package has no
 special compression-ordering requirement.
 
-Under a virtual path, `server-url` comes from the request's scheme and host. Behind
-a reverse proxy or load balancer, apply `X-Forwarded-Proto` and `X-Forwarded-Host`
-with `UseForwardedHeaders` before `UseUmbraco`, or have the proxy preserve the
-`Host` header. `UmbracoApplicationUrl` and `BackOfficeHost` alone do not change it.
+The backoffice's server URL comes from the browser, as at the root, so the backoffice
+does not depend on the `Host` header or on forwarded headers. Absolute URLs that
+Umbraco builds on the server, such as the links in emails, follow Umbraco's usual
+rules: behind a reverse proxy or load balancer, set `UmbracoApplicationUrl`, or apply
+`X-Forwarded-Proto` and `X-Forwarded-Host` with `UseForwardedHeaders` before `UseUmbraco`.
+
+The package adds an **Application virtual path** check to the backoffice, under
+Settings → Health Check → Configuration. The check reports:
+
+- whether the package matches the site's Umbraco version;
+- the path base that requests arrive with;
+- every change that could not be applied;
+- requests that reached the site outside the virtual path, which Kestrel also answers.
+
+The startup log carries the same warnings.
 
 Several Umbraco sites on one host, such as sibling IIS applications, share
 `Path=/` cookies. Give each site its own
@@ -129,7 +143,9 @@ The `full` case:
 - request the OpenAPI documents;
 - visit every front-end page reachable from the home page and check that each image loads;
 - request a password reset and follow the emailed link to the new-password form;
+- load Umbraco's built-in error page with its fonts and background, and submit the contact form, an Umbraco surface form, with an invalid and then a valid address;
 - sign in to the backoffice and check the dashboard and the header logo;
+- run the health check as the backoffice dashboard does, and expect every result to succeed;
 - open the backoffice using a differently cased prefix, import every patched JavaScript module, and check real static-file 304 responses;
 - reload and check that the session is restored through a token refresh;
 - invite an editor and follow the emailed link to the password form;

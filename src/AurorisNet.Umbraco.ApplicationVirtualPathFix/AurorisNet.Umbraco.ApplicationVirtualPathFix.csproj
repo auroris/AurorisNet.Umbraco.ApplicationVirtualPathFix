@@ -17,6 +17,10 @@
     <PackageProjectUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</PackageProjectUrl>
     <RepositoryUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <!-- Symbols travel inside the assembly, and Source Link points them at this repository's commit,
+         so a site's debugger can step into the package. Generated sources are embedded as well. -->
+    <DebugType>embedded</DebugType>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests" />

@@ -32,8 +32,12 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             await browser.StepAsync("OpenAPI documents", () => CheckOpenApiAsync(site, ct));
             await browser.StepAsync("Front end: every page and image", () => CrawlFrontEndAsync(browser.Page, site));
             await browser.StepAsync("Forgotten password email", () => FollowPasswordResetEmailAsync(browser, site, ct));
+            // After the password reset, which takes the first email in the mail folder.
+            await browser.StepAsync("Built-in error page", () => CheckErrorPageAsync(site, ct));
+            await browser.StepAsync("Contact form", () => SubmitContactFormAsync(site, ct));
             await browser.StepAsync("Backoffice sign-in", () => SignInAsync(browser.Page, site));
             await browser.StepAsync("Server context", () => CheckServerContextAsync(browser.Page, site));
+            await browser.StepAsync("Health check", () => CheckHealthAsync(browser.Page, site));
             await browser.StepAsync("Patched modules and HTTP caching", () => CheckPatchedAssetsAsync(browser.Page, site, ct));
             await browser.StepAsync("Session restore after reload", () => ReloadAndRestoreSessionAsync(browser.Page, site));
             await browser.StepAsync("Cross-site session restore", () => RestoreFromExternalLinkAsync(browser, site));
@@ -150,6 +154,57 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         var log = TeeOutput.Create(_log, name);
         _log = log;
         return log;
+    }
+
+    /// <summary>Loads Umbraco's built-in error page and every font and image its stylesheet uses.</summary>
+    private static async Task CheckErrorPageAsync(TestSite site, CancellationToken ct)
+    {
+        using var http = site.CreateHttpClient();
+        var missing = site.Url("/no-such-page/");
+        using var response = await http.GetAsync(missing, ct);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var href = Regex.Match(await response.Content.ReadAsStringAsync(ct), """<link\b[^>]*\bhref="([^"]*nonodes\.css[^"]*)""").Groups[1].Value;
+        var stylesheet = new Uri(missing, WebUtility.HtmlDecode(href));
+        Assert.Equal(site.Url("/umbraco/website/nonodes.css").AbsolutePath, stylesheet.AbsolutePath);
+        var assets = Regex.Matches(await http.GetStringAsync(stylesheet, ct), """url\(['"]?([^'")]+)""")
+            .Select(match => new Uri(stylesheet, match.Groups[1].Value)).Distinct().ToArray();
+        Assert.NotEmpty(assets);
+        foreach (var asset in assets)
+        {
+            using var file = await http.GetAsync(asset, ct);
+            Assert.True(file.IsSuccessStatusCode, $"{asset.AbsolutePath} returned HTTP {(int)file.StatusCode}");
+        }
+    }
+
+    /// <summary>Posts the starter kit's contact form, an Umbraco surface form, with invalid and then valid input.</summary>
+    private static async Task SubmitContactFormAsync(TestSite site, CancellationToken ct)
+    {
+        // Server-side validation shows that the post reached the surface controller through the virtual path,
+        // with its antiforgery and route tokens; a valid post redirects back to the page under the prefix.
+        var contact = site.Url("/contact/");
+        foreach (var (email, valid) in new[] { ("not-an-email", false), ("visitor@example.test", true) })
+        {
+            using var http = site.CreateHttpClient(followRedirects: false);
+            var form = Regex.Match(await http.GetStringAsync(contact, ct), "<form[\\s\\S]*?</form>").Value;
+            Assert.Contains($"action=\"{contact.AbsolutePath}\"", form, StringComparison.Ordinal);
+            var fields = Regex.Matches(form, """<input\b[^>]*\bname="(__RequestVerificationToken|ufprt)"[^>]*\bvalue="([^"]*)""")
+                .ToDictionary(match => match.Groups[1].Value, match => WebUtility.HtmlDecode(match.Groups[2].Value));
+            Assert.Equal(2, fields.Count);
+            fields["Name"] = "Visitor";
+            fields["Email"] = email;
+            fields["Message"] = "Hello from under the virtual path.";
+            using var response = await http.PostAsync(contact, new FormUrlEncodedContent(fields), ct);
+            if (valid)
+            {
+                Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+                Assert.Equal(contact.AbsolutePath, response.Headers.Location?.OriginalString);
+            }
+            else
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Contains("The Email field is not a valid e-mail address.", await response.Content.ReadAsStringAsync(ct), StringComparison.Ordinal);
+            }
+        }
     }
 
     private static async Task CheckOpenApiAsync(TestSite site, CancellationToken ct)
