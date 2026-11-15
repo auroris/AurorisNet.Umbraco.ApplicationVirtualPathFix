@@ -102,8 +102,8 @@ public sealed class SupportedReleasesTests
     }
 
     /// <summary>
-    /// Checks that the release under test is one of the supported releases. Testing another release, as when checking a
-    /// new Umbraco release, fails only this test until the release is added to <c>UmbracoReleases</c>.
+    /// Checks that the release under test is one of the supported releases. Testing an unlisted release fails this
+    /// check until the release is added to <c>UmbracoReleases</c>.
     /// </summary>
     [Fact]
     public void The_release_under_test_is_supported()
