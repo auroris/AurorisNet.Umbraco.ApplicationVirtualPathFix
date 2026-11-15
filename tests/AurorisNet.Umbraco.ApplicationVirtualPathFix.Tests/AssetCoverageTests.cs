@@ -28,11 +28,11 @@ public sealed class AssetCoverageTests(AssetPatchTests.Assets assets) : IClassFi
                 source = source.Replace("const U = \"/umbraco/backoffice/\";", "", StringComparison.Ordinal);
             }
             else if (BackOfficeAssetPatches.Modules.Contains(module))
-                source = BackOfficeAssetPatches.PatchModule(module, source, AssetsPath, Missing);
+                source = BackOfficeAssetPatches.PatchModule(module, source, AssetsPath, Unapplied);
             else if (path == "/umbraco/website/nonodes.css")
-                source = BackOfficeAssetPatches.PatchWebsiteStyles(source, Missing);
+                source = BackOfficeAssetPatches.PatchWebsiteStyles(source, Unapplied);
             else if (path == "/umbraco/login/login.js")
-                source = BackOfficeAssetPatches.PatchLoginScript(source, "/portal", "/portal/umbraco", Missing);
+                source = BackOfficeAssetPatches.PatchLoginScript(source, "/portal", "/portal/umbraco", Unapplied);
             foreach (Match match in references.Matches(source))
                 unexpected.Add($"{path}:{source.AsSpan(0, match.Index).Count('\n') + 1}: {match.Value}");
         }
@@ -71,7 +71,7 @@ public sealed class AssetCoverageTests(AssetPatchTests.Assets assets) : IClassFi
             examined++;
             var module = BackOfficeAssetPatches.NormalizeModulePath(path[BackOfficeAssetPatches.AssetsRoot.Length..]);
             if (BackOfficeAssetPatches.Modules.Contains(module))
-                BackOfficeAssetPatches.PatchModule(module, source, AssetsPath, Missing);
+                BackOfficeAssetPatches.PatchModule(module, source, AssetsPath, Unapplied);
             else if (!reviewed.ContainsKey(module))
                 unexpected.Add($"{module}: unreviewed server URL consumer");
         }
@@ -79,6 +79,5 @@ public sealed class AssetCoverageTests(AssetPatchTests.Assets assets) : IClassFi
         Assert.True(unexpected.Count == 0, "Review server URL usage:\n" + string.Join('\n', unexpected));
     }
 
-    private static void Missing(string resource, string pattern)
-        => Assert.Fail($"{resource}: missing patch pattern {pattern}");
+    private static void Unapplied(string resource, string reason) => Assert.Fail($"Umbraco's {resource} {reason}");
 }

@@ -42,7 +42,10 @@ Known bundles are matched by directory and filename, with `-????????` representi
 an eight-character build hash where needed. Fixed filenames remain exact matches.
 Asset URL corrections share one rewrite of quoted `/umbraco/backoffice/` paths;
 worker filenames retain the hashes supplied by Umbraco. Changes to JavaScript
-behavior remain explicit patches. Compatibility tests check every registered
+behavior remain explicit patches. Their placeholders stand for minified variable
+names, so a rebuild that only renames variables still matches. Each patch applies
+only when it finds the expected number of matches: exactly one for a behavior
+change, and one or more for a URL rewrite. Compatibility tests check every registered
 bundle and search pattern against the installed Umbraco assets, including bundles
 the browser scenarios do not load.
 
@@ -66,7 +69,8 @@ upgrading a site's Umbraco without the matching package release makes restore fa
 with a version conflict (NU1107). Upgrade both together. A site that references
 those two packages directly at another version gets only a NuGet warning (NU1608);
 the package then logs a warning at startup. Asset preparation also logs warnings
-for missing or ambiguous bundles and for each patch that no longer finds its pattern.
+for missing or ambiguous bundles, and for each patch that it skips because its pattern
+no longer matches the expected number of times.
 
 Requests must reach the site with the prefix still in the path, or with the path
 base already set: by IIS for a child application, or by

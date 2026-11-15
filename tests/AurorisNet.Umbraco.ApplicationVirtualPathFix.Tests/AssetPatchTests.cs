@@ -22,7 +22,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
         Assert.True(matches.Length == 1,
             $"Expected exactly one bundle for {module}; found {matches.Length}: {string.Join(", ", matches.Select(file => file.Name))}");
         var source = await ReadAsync(matches[0]);
-        var patched = BackOfficeAssetPatches.PatchModule(module, source, AssetsPath, Missing);
+        var patched = BackOfficeAssetPatches.PatchModule(module, source, AssetsPath, Unapplied);
         Assert.NotEqual(source, patched);
 
         // Check the actual URL values, including worker filenames, against the served asset root.
@@ -68,7 +68,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
             const api = "/umbraco/management/api/v1/media";
             const external = "https://cdn.example.test/umbraco/backoffice/assets/logo.svg";
             """;
-        Assert.Equal(expected, BackOfficeAssetPatches.PatchModule("/packages/core/manifests.js", source, AssetsPath, Missing));
+        Assert.Equal(expected, BackOfficeAssetPatches.PatchModule("/packages/core/manifests.js", source, AssetsPath, Unapplied));
     }
 
     [Fact]
@@ -76,18 +76,75 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     {
         const string source = """const image = html`<img src="/umbraco/backoffice/assets/logo.svg">`;""";
         var patched = BackOfficeAssetPatches.PatchModule("/packages/core/manifests.js", source,
-            "/a'b&c`d\"e/umbraco/backoffice/hash", Missing);
+            "/a'b&c`d\"e/umbraco/backoffice/hash", Unapplied);
         Assert.Equal("""const image = html`<img src="/a%27b%26c%60d%22e/umbraco/backoffice/hash/assets/logo.svg">`;""", patched);
     }
 
+    [Theory]
+    // Umbraco 18.2.1 built the same code with other minified identifiers.
+    [InlineData("/packages/block/property-editor-ui-block-grid.element-????????.js",
+        "return new URL(ti(o), this.#s).href;",
+        "return new URL(ti(o).replace(/^\\/(?!\\/)/, \"\"), this.#s + \"/\").href;")]
+    [InlineData("/packages/preview/index.js",
+        "return s?.url ? s.url.startsWith(\"/\") ? `${this.#r}${s.url}` : s.url : null;\nconst r = new URL(s, e), i = new URLSearchParams(r.search);",
+        "return s?.url ? s.url.startsWith(\"/\") ? new URL(s.url, this.#r || location.origin).href : s.url : null;\n"
+            + "const r = new URL(s, e.endsWith(\"/\") ? e : e + \"/\"), i = new URLSearchParams(r.search);")]
+    public void Code_patches_follow_renamed_identifiers(string module, string source, string expected)
+    {
+        Assert.Equal(expected, BackOfficeAssetPatches.PatchModule(module, source, AssetsPath, Unapplied));
+    }
+
+    [Theory]
+    [InlineData("s.startsWith(\"/\") ? `${this.#o}${s}` : s;", "new URL(s, this.#o).href;")]
+    [InlineData("s.startsWith(\"/\") ? `${this.#o}${t}` : s;", null)] // A repeated placeholder is the same identifier.
+    [InlineData("xs.startsWith(\"/\") ? `${this.#o}${s}` : s;", null)] // Placeholders match whole identifiers,
+    [InlineData("s.startsWith(\"/\") ? `${this.#o}${s}` : sx;", null)]
+    [InlineData("a.s.startsWith(\"/\") ? `${this.#o}${s}` : s;", null)] // and an opening one is not a property.
+    public void Placeholders_match_whole_identifiers(string source, string? expected)
+    {
+        var edit = new BackOfficeAssetPatches.Edit("@url.startsWith(\"/\") ? `${this.@server}${@url}` : @url", "new URL(@url, this.@server).href");
+        var reasons = new List<string>();
+        Assert.Equal(expected ?? source, BackOfficeAssetPatches.Apply(source, "test.js", edit, (_, reason) => reasons.Add(reason)));
+        Assert.Equal(expected is null ? 1 : 0, reasons.Count);
+    }
+
     [Fact]
-    public async Task Every_login_patch_matches_the_installed_script()
+    public void Replacements_insert_identifiers_and_values_literally()
+    {
+        // A .NET replacement string would read "${" and "$1"; inserted values are not read as placeholders.
+        var edit = new BackOfficeAssetPatches.Edit("@a + @b", "`${@a}${@b}` + @suffix");
+        var values = new Dictionary<string, string> { ["suffix"] = "\"@a $1\"" };
+        Assert.Equal("`${x}${y}` + \"@a $1\";", BackOfficeAssetPatches.Apply("x + y;", "test.js", edit, Unapplied, values));
+        Assert.Throws<InvalidOperationException>(() => BackOfficeAssetPatches.Apply("x + y;", "test.js", new("@a + @b", "@c"), Unapplied));
+    }
+
+    [Fact]
+    public void Edits_apply_only_with_the_expected_number_of_matches()
+    {
+        const string source = "a + 1; b + 1;";
+        var reasons = new List<string>();
+        void Record(string resource, string reason) => reasons.Add($"{resource} {reason}");
+
+        Assert.Equal(source, BackOfficeAssetPatches.Apply(source, "test.js", new("@x + 1", "@x + 2"), Record));
+        Assert.Equal("test.js matches @x + 1 2 times instead of 1", Assert.Single(reasons));
+        Assert.Equal("a + 2; b + 2;", BackOfficeAssetPatches.Apply(source, "test.js", new("@x + 1", "@x + 2", 2), Record));
+        Assert.Equal("a + 2; b + 2;", BackOfficeAssetPatches.Apply(source, "test.js",
+            new("@x + 1", "@x + 2", BackOfficeAssetPatches.Edit.Every), Record));
+        Assert.Equal(source, BackOfficeAssetPatches.Apply(source, "test.js",
+            new("@x + 3", "@x + 4", BackOfficeAssetPatches.Edit.Every), Record));
+        Assert.Equal(["test.js matches @x + 1 2 times instead of 1", "test.js no longer contains @x + 3"], reasons);
+    }
+
+    [Theory]
+    [InlineData("/portal")]
+    [InlineData("/a@b")] // The configured path is inserted as text, not read as a placeholder.
+    public async Task Every_login_patch_matches_the_installed_script(string prefix)
     {
         var source = await ReadAsync(assets.Files.GetFileInfo("/umbraco/login/login.js"));
-        var patched = BackOfficeAssetPatches.PatchLoginScript(source, "/portal", "/portal/umbraco", Missing);
-        Assert.Contains("new Request(\"/portal\" + \"/umbraco/", patched, StringComparison.Ordinal);
-        Assert.Contains("window.location.origin + \"/portal\"", patched, StringComparison.Ordinal);
-        Assert.Contains("backofficePath: \"/portal/umbraco\"", patched, StringComparison.Ordinal);
+        var patched = BackOfficeAssetPatches.PatchLoginScript(source, prefix, prefix + "/umbraco", Unapplied);
+        Assert.Contains($"new Request(\"{prefix}\" + \"/umbraco/", patched, StringComparison.Ordinal);
+        Assert.Contains($"window.location.origin + \"{prefix}\"", patched, StringComparison.Ordinal);
+        Assert.Contains($"backofficePath: \"{prefix}/umbraco\"", patched, StringComparison.Ordinal);
         Assert.Contains("umbHttpClient.setConfig", patched, StringComparison.Ordinal);
         Assert.DoesNotContain("new Request(\"/umbraco/", patched, StringComparison.Ordinal);
     }
@@ -96,7 +153,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     public async Task Website_styles_patch_matches_the_installed_stylesheet()
     {
         var source = await ReadAsync(assets.Files.GetFileInfo("/umbraco/website/nonodes.css"));
-        var patched = BackOfficeAssetPatches.PatchWebsiteStyles(source, Missing);
+        var patched = BackOfficeAssetPatches.PatchWebsiteStyles(source, Unapplied);
         Assert.NotEqual(source, patched);
         Assert.DoesNotContain("url(/umbraco/website/", patched, StringComparison.Ordinal);
         Assert.Contains("url(", patched, StringComparison.Ordinal);
@@ -107,7 +164,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     {
         const string changed = "/* Assets used to live under /umbraco/backoffice/. */";
         var failures = new List<string>();
-        void Record(string resource, string pattern) => failures.Add(resource + ": " + pattern);
+        void Record(string resource, string reason) => failures.Add(resource + " " + reason);
         foreach (var module in BackOfficeAssetPatches.Modules)
         {
             failures.Clear();
@@ -122,8 +179,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
         Assert.Single(failures);
     }
 
-    private static void Missing(string resource, string pattern)
-        => Assert.Fail($"{resource}: expected patch pattern was not found: {pattern}");
+    private static void Unapplied(string resource, string reason) => Assert.Fail($"Umbraco's {resource} {reason}");
 
     private static async Task<string> ReadAsync(IFileInfo file)
     {

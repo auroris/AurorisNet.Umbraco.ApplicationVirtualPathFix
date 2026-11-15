@@ -25,37 +25,51 @@ internal static partial class BackOfficeAssetPatches
         "/external/monaco-editor/tsMode-????????.js",
     };
 
-    // Other source changes remain explicit and are checked against the installed assets.
-    private static readonly Dictionary<string, (string Pattern, string Replacement)[]> CodePatches = new(StringComparer.OrdinalIgnoreCase)
+    // Other source changes remain explicit and are checked against the installed assets. Placeholders
+    // carry the identifiers of Umbraco's TypeScript sources, which minification replaces.
+    private static readonly Dictionary<string, Edit[]> CodePatches = new(StringComparer.OrdinalIgnoreCase)
     {
         ["/css/umb-css.css"] =
         [
-            ("url(/umbraco/backoffice/assets/", "url(../assets/"),
+            new("url(/umbraco/backoffice/assets/", "url(../assets/", Edit.Every),
         ],
         ["/packages/block/property-editor-ui-block-grid.element-????????.js"] =
         [
-            ("new URL(oi(o), this.#s).href", "new URL(oi(o).replace(/^\\/(?!\\/)/, \"\"), this.#s + \"/\").href"),
+            new("new URL(@transformServerPathToClientPath(@layoutStylesheet), this.@serverUrl).href",
+                "new URL(@transformServerPathToClientPath(@layoutStylesheet).replace(/^\\/(?!\\/)/, \"\"), this.@serverUrl + \"/\").href"),
         ],
         ["/packages/media/input-upload-field.element-????????.js"] =
         [
-            ("this.src.startsWith(\"/\") ? `${this._serverUrl}${this.src}` : this.src",
+            new("this.src.startsWith(\"/\") ? `${this._serverUrl}${this.src}` : this.src",
                 "this.src.startsWith(\"/\") ? new URL(this.src, this._serverUrl || location.origin).href : this.src"),
-            ("e = i ? t : this._serverUrl + t", "e = i ? t : new URL(t, this._serverUrl || location.origin).href"),
+            new("@fullUrl = @isBlob ? @src : this._serverUrl + @src",
+                "@fullUrl = @isBlob ? @src : new URL(@src, this._serverUrl || location.origin).href"),
         ],
         ["/packages/preview/index.js"] =
         [
-            ("s.url.startsWith(\"/\") ? `${this.#o}${s.url}` : s.url",
-                "s.url.startsWith(\"/\") ? new URL(s.url, this.#o || location.origin).href : s.url"),
-            ("const n = new URL(s, t)", "const n = new URL(s, t.endsWith(\"/\") ? t : t + \"/\")"),
+            new("@urlInfo.url.startsWith(\"/\") ? `${this.@serverUrl}${@urlInfo.url}` : @urlInfo.url",
+                "@urlInfo.url.startsWith(\"/\") ? new URL(@urlInfo.url, this.@serverUrl || location.origin).href : @urlInfo.url"),
+            new("const @url = new URL(@unique, @host)", "const @url = new URL(@unique, @host.endsWith(\"/\") ? @host : @host + \"/\")"),
         ],
     };
+
+    // @prefix and @backOfficePath are the configured paths as JavaScript strings.
+    private static readonly Edit[] LoginScriptEdits =
+    [
+        new("new Request(\"/umbraco/", "new Request(@prefix + \"/umbraco/", Edit.Every),
+        new("const @serverUrl = window.location.origin, @serverConnection = new @UmbServerConnection(@host, @serverUrl);",
+            "const @serverUrl = window.location.origin + @prefix, @serverConnection = new @UmbServerConnection(@host, @serverUrl);"),
+        new("backofficePath: \"/umbraco\"", "backofficePath: @backOfficePath"),
+    ];
+
+    private static readonly Edit WebsiteStylesEdit = new("url(/umbraco/website/", "url(", Edit.Every);
 
     internal static IEnumerable<string> Modules => AssetUrlModules.Concat(CodePatches.Keys);
 
     // Preserve the distinction between stable files and hashed chunks sharing the same stem.
     internal static string NormalizeModulePath(string path) => BundleHash().Replace(path, "-????????");
 
-    internal static string PatchModule(string module, string source, string assetsPath, Action<string, string> missing)
+    internal static string PatchModule(string module, string source, string assetsPath, Action<string, string> unapplied)
     {
         if (AssetUrlModules.Contains(module))
         {
@@ -69,35 +83,82 @@ internal static partial class BackOfficeAssetPatches
                 matched = true;
                 return match.Value[..1] + root;
             });
-            if (!matched) missing(module, QuotedAssetRoot().ToString());
+            if (!matched) unapplied(module, "no longer contains " + QuotedAssetRoot());
             return result;
         }
 
-        foreach (var (pattern, replacement) in CodePatches[module])
-            source = Replace(source, module, pattern, replacement, missing);
+        foreach (var edit in CodePatches[module])
+            source = Apply(source, module, edit, unapplied);
         return source;
     }
 
-    internal static string PatchLoginScript(string source, string pathBase, string backOfficePath, Action<string, string> missing)
+    internal static string PatchLoginScript(string source, string pathBase, string backOfficePath, Action<string, string> unapplied)
     {
         var prefix = JsonSerializer.Serialize(pathBase);
-        source = Replace(source, "login.js", "new Request(\"/umbraco/", $"new Request({prefix} + \"/umbraco/", missing);
-        source = Replace(source, "login.js", "const r = window.location.origin, o = new Rt(e, r);",
-            $"const r = window.location.origin + {prefix}, o = new Rt(e, r);", missing);
-        source = Replace(source, "login.js", "backofficePath: \"/umbraco\"",
-            $"backofficePath: {JsonSerializer.Serialize(backOfficePath)}", missing);
+        var values = new Dictionary<string, string> { ["prefix"] = prefix, ["backOfficePath"] = JsonSerializer.Serialize(backOfficePath) };
+        foreach (var edit in LoginScriptEdits)
+            source = Apply(source, "login.js", edit, unapplied, values);
         // The slim login does not configure the shared API client for its public API calls.
         return "import { umbHttpClient } from '@umbraco-cms/backoffice/http-client';\n"
             + $"umbHttpClient.setConfig({{ baseUrl: window.location.origin + {prefix} }});\n" + source;
     }
 
-    internal static string PatchWebsiteStyles(string source, Action<string, string> missing)
-        => Replace(source, "nonodes.css", "url(/umbraco/website/", "url(", missing);
+    internal static string PatchWebsiteStyles(string source, Action<string, string> unapplied)
+        => Apply(source, "nonodes.css", WebsiteStylesEdit, unapplied);
 
-    private static string Replace(string source, string resource, string pattern, string replacement, Action<string, string> missing)
+    /// <summary>
+    /// Applies <paramref name="edit"/> when it finds the number of matches it expects. Otherwise leaves the source
+    /// unchanged and passes <paramref name="unapplied"/> a reason that completes "Umbraco's {resource} ...".
+    /// </summary>
+    internal static string Apply(string source, string resource, Edit edit, Action<string, string> unapplied,
+        IReadOnlyDictionary<string, string>? values = null)
     {
-        if (!source.Contains(pattern, StringComparison.Ordinal)) missing(resource, pattern);
-        return source.Replace(pattern, replacement, StringComparison.Ordinal);
+        var found = edit.Pattern.Count(source);
+        if (found == 0 || (edit.Count != Edit.Every && found != edit.Count))
+        {
+            unapplied(resource, found == 0
+                ? "no longer contains " + edit.Find
+                : $"matches {edit.Find} {found} times instead of {edit.Count}");
+            return source;
+        }
+
+        // Expand placeholders with an evaluator: a .NET replacement string would treat "${" in JavaScript as a substitution.
+        return edit.Pattern.Replace(source, match => Placeholder().Replace(edit.Replace, placeholder =>
+        {
+            var name = placeholder.Groups[1].Value;
+            return match.Groups[name] is { Success: true } group ? group.Value
+                : values?.GetValueOrDefault(name) ?? throw new InvalidOperationException($"{edit.Find} does not define {placeholder.Value}.");
+        }));
+    }
+
+    /// <summary>Replaces code of a known shape when it occurs the expected number of times.</summary>
+    /// <remarks>
+    /// Umbraco's minified bundles rename variables between builds, so <c>@name</c> in <see cref="Find"/> matches
+    /// one whole identifier or <c>#private</c> name, and a repeated <c>@name</c> must be the same identifier.
+    /// <see cref="Replace"/> inserts those identifiers, or values supplied when the edit is applied.
+    /// </remarks>
+    internal sealed class Edit(string find, string replace, int count = 1)
+    {
+        /// <summary>Changes every match, of which there must be at least one.</summary>
+        internal const int Every = 0;
+
+        internal string Find { get; } = find;
+        internal string Replace { get; } = replace;
+        internal int Count { get; } = count;
+        internal Regex Pattern { get; } = Compile(find);
+
+        private static Regex Compile(string find)
+        {
+            var defined = new HashSet<string>(StringComparer.Ordinal);
+            var pattern = Placeholder().Replace(Regex.Escape(find), match =>
+            {
+                var name = match.Groups[1].Value;
+                // Never match part of a longer identifier. One that opens the pattern is not a property either.
+                var before = match.Index == 0 ? @"(?<![\w$#.])" : @"(?<![\w$#])";
+                return before + (defined.Add(name) ? $@"(?<{name}>#?[A-Za-z_$][\w$]*)" : $@"\k<{name}>") + @"(?![\w$])";
+            });
+            return new Regex(pattern, RegexOptions.CultureInvariant);
+        }
     }
 
     [GeneratedRegex(@"-[A-Za-z0-9_-]{8}(?=\.js$)", RegexOptions.CultureInvariant)]
@@ -106,4 +167,7 @@ internal static partial class BackOfficeAssetPatches
     // Requiring an opening quote excludes prose such as the theme module's asset-path comment.
     [GeneratedRegex("""["'`]/umbraco/backoffice/""", RegexOptions.CultureInvariant)]
     private static partial Regex QuotedAssetRoot();
+
+    [GeneratedRegex(@"@([A-Za-z]\w*)", RegexOptions.CultureInvariant)]
+    private static partial Regex Placeholder();
 }

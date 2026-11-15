@@ -45,12 +45,16 @@ no certificate is installed in the machine's trust store. See
 
 `AssetPatchTests` also checks every patch against the restored Umbraco files without
 starting a site. It fails if a bundle pattern finds zero or multiple files, or if
-any search pattern has no match. Run it on its own with
+a search pattern does not match the number of times its patch expects. Run it on its own with
 `dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-class '*AssetPatchTests'`.
 When updating `UmbracoVersion`, build and run these checks before the full suite.
 Bundle hash changes alone need no patch edits; the definitions in
-`BackOfficeAssetPatches.cs` use `-????????` for hashed filenames. The package's
-exact version dependency still identifies the release that has been validated.
+`BackOfficeAssetPatches.cs` use `-????????` for hashed filenames. Code patches write
+minified identifiers as `@name` placeholders, named after Umbraco's TypeScript source,
+so a rebuild that only renames variables needs no edits either. A repeated `@name`
+must match the same identifier. A behavior change expects exactly one match; URL
+rewrites expect one or more. The package's exact version dependency still identifies
+the release that has been validated.
 
 `AssetCoverageTests` independently scans the restored JavaScript and CSS for
 root-absolute asset references and inventories server-URL consumers.

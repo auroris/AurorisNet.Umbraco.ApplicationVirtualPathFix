@@ -33,13 +33,13 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
             }
 
             Add(BackOfficeAssetPatches.AssetsRoot + directory + "/" + matches[0].Name, matches[0],
-                source => BackOfficeAssetPatches.PatchModule(module, source, paths.BackOfficeAssetsPath, Missing));
+                source => BackOfficeAssetPatches.PatchModule(module, source, paths.BackOfficeAssetsPath, Unapplied));
         }
 
         Add("/umbraco/login/login.js", inner.GetFileInfo("/umbraco/login/login.js"),
-            source => BackOfficeAssetPatches.PatchLoginScript(source, prefix, paths.BackOfficePath, Missing));
+            source => BackOfficeAssetPatches.PatchLoginScript(source, prefix, paths.BackOfficePath, Unapplied));
         Add("/umbraco/website/nonodes.css", inner.GetFileInfo("/umbraco/website/nonodes.css"),
-            source => BackOfficeAssetPatches.PatchWebsiteStyles(source, Missing));
+            source => BackOfficeAssetPatches.PatchWebsiteStyles(source, Unapplied));
 
         void Add(string path, IFileInfo file, Func<string, string> patch)
         {
@@ -53,11 +53,11 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
             _patched.Add(path, new PatchedFile(file.Name, bytes, modified));
         }
 
-        void Missing(string resource, string pattern)
+        void Unapplied(string resource, string reason)
             => logger.LogWarning(
-                "Umbraco's {Resource} no longer contains {Pattern}, so that part of the application virtual path fix is not applied. "
+                "Umbraco's {Resource} {Reason}, so that part of the application virtual path fix is not applied. "
                 + "Install the AurorisNet.Umbraco.ApplicationVirtualPathFix release that matches this site's Umbraco version.",
-                resource, pattern);
+                resource, reason);
     }
 
     public IFileInfo GetFileInfo(string subpath)
