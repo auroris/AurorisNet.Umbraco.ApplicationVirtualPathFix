@@ -43,37 +43,67 @@ suite does not need internet access. HTTPS cases use disposable certificates;
 no certificate is installed in the machine's trust store. See
 [Browser validation](FIXES.md#browser-validation) for the checks and their scope.
 
+Every patch is one entry in the `Patches` table in `BackOfficeAssetPatches.cs`: the
+file's path in the web root, with `-????????` for a bundle's build hash, and its
+changes. An entry can move the file's quoted `/umbraco/backoffice/` URLs under the
+asset root, apply edits, and add a preamble to its first line. Each edit names the
+line of Umbraco's source it changes, and a hashed bundle without edits names a source
+it is built from. The file provider and the tests all read this table.
+
 `AssetPatchTests` also checks every patch against the restored Umbraco files without
-starting a site. It fails if a bundle pattern finds zero or multiple files, or if
-a search pattern does not match the number of times its patch expects. Run it on its own with
+starting a site. It fails if a path finds zero or multiple files, if a search pattern
+does not match the number of times its patch expects, if a patch changes the file's
+number of lines, or if a patched script does not parse as JavaScript. The parser,
+Acornima, first reads the script as Umbraco installed it. Unchanged line numbers
+keep Umbraco's source maps accurate for patched files in the browser's developer
+tools. Run it on its own with
 `dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-class '*AssetPatchTests'`.
 When updating `UmbracoVersion`, build and run these checks before the full suite.
-Bundle hash changes alone need no patch edits; the definitions in
-`BackOfficeAssetPatches.cs` use `-????????` for hashed filenames. Code patches write
-minified identifiers as `@name` placeholders, named after Umbraco's TypeScript source,
-so a rebuild that only renames variables needs no edits either. A repeated `@name`
-must match the same identifier. A behavior change expects exactly one match; URL
-rewrites expect one or more. The package's exact version dependency still identifies
-the release that has been validated.
+Bundle hash changes alone need no patch edits. Code patches write minified
+identifiers as `@name` placeholders, named after Umbraco's TypeScript source, so a
+rebuild that only renames variables needs no edits either. A repeated `@name` must
+match the same identifier, and `@@` stands for a literal `@`. A behavior change
+expects exactly one match; URL rewrites expect one or more. The package's exact
+version dependency still identifies the release that has been validated.
+
+`PatchOriginTests` checks each patch against Umbraco's source maps: every match of
+an edit must come from the line of Umbraco's TypeScript that the edit names, so a
+pattern cannot quietly change different code. When a pattern stops matching, the
+failure says whether Umbraco's source still contains that line, in which case only
+the minified output changed and the pattern needs updating, or whether Umbraco
+changed the code, in which case the patch needs another look. When a path finds no
+file, the failure names the bundle that is now built from the patch's sources.
 
 `AssetCoverageTests` independently scans the restored JavaScript and CSS for
-root-absolute asset references and inventories server-URL consumers.
-New or renamed files fail the scan unless a patch handles them or an explicit
-exception explains the reference. These are conservative source checks, not a
-JavaScript parser; inspect each new match when upgrading Umbraco. The scan does
-not try to infer URL behavior from arbitrary string concatenations. Patch checks
-and the browser journey cover the known URL corrections.
+root-absolute asset references. New or renamed files fail the scan unless a patch
+handles them or an explicit exception explains the reference. It also reads
+Umbraco's TypeScript from the bundles' source maps, and the unminified apps that
+ship without maps, and finds each line that builds a URL in a way that can lose the
+virtual path: the server URL joined to a dynamic value, `new URL` with a base, the
+bare origin used to build a URL, and root-absolute paths. A line counts as patched when
+an edit names it, which `PatchOriginTests` confirms, or when its bundle has its asset
+URLs moved. Any other line must carry a review in the test. A new or changed line
+fails, and so does a review that Umbraco's code no longer matches.
+These are conservative line checks, not a JavaScript parser; inspect each new match
+when upgrading Umbraco. Patch checks and the browser journey cover the known URL
+corrections.
 
 `UrlTests` checks media-prefix boundaries, signed queries and fragments, import-map
 entries and scopes, and OAuth callbacks without starting a site. `BackOfficeBodyTests`
 uses the real body Tag Helper, including DI and view-context activation, to check
 attributes, form actions, view scoping and session hints with configured cookie names
 and SameSite modes. Middleware checks cover request-path restoration and version
-warnings.
+warnings. `DecoratorTests` fails if the package leaves a member of an Umbraco interface
+to its default implementation. Umbraco adds members that way, and a decorator written
+before the member existed would otherwise run the default instead of forwarding.
 
 `AssetFileProviderTests` checks that startup prepares patched copies without changing
 the original files, and that repeated reads neither repeat patching nor log more
-warnings. A small HTTP host exercises the real static-file handler's content lengths,
+warnings. Each patched copy's `Last-Modified` is the later of the Umbraco file's time
+and the time of the commit the package was built from, so a second provider, as after
+a restart or on another server, reports the same validators. The build reads that time
+with `git log`. To build outside a Git checkout, pass it as
+`-p:SourceTimestamp=2026-11-14T12:00:00Z`. A small HTTP host exercises the real static-file handler's content lengths,
 HEAD requests, conditional responses and byte ranges. Middleware tests check that
 prepared assets and rendered HTML compress correctly with either middleware ordering.
 These checks do not install Umbraco or start another starter-kit site.

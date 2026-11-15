@@ -22,8 +22,11 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 | The error screen and installer/upgrader layout load their illustration from the host root. | Both load the illustration from the configured backoffice asset root. |
 | The backoffice stylesheet loads Monaco's codicon font from the host root. | The font loads relative to the stylesheet under the application prefix, including icons in the editor's Find widget. |
 | The block grid editor loads its default layout stylesheet from `/umbraco/backoffice/css/...`, and resolves a custom layout stylesheet's site path against the host root. | Both stylesheets load under the prefix. |
+| The block catalogue and the block type cards in a block editor's settings resolve thumbnail site paths against the host root. | Block thumbnails load under the prefix. |
 | The media upload field and the preview prepend the server URL to media and page URLs that already include the virtual path. | Image previews, file links and the preview frame use the URL once. |
+| The website's preview badge ends preview with a request to the host root, so preview stays on. | End preview reaches the management API under the prefix and reloads the page without preview. |
 | Tiptap's default stylesheet, Monaco's worker scripts and the dark/high-contrast theme stylesheets use root URLs. | They load from the configured backoffice asset root, including the application prefix and asset hash. |
+| A rich text stylesheet saved with the stylesheet root, such as `/css/rte.css`, no longer matches the server's root, which includes the virtual path, so the root is added twice. | Stylesheets saved with or without the root load from it once. |
 | Basic-authentication routes already include the application prefix, so MVC adds it twice to form actions and redirects. | Login forms and two-factor redirects contain the prefix once; `Url.Content` still sees the original path base. |
 | The stylesheet of Umbraco's built-in Page Not Found, No Content, Maintenance and Upgrading pages loads its fonts and background from the root. | They load from beside the stylesheet, under the prefix. |
 | Initial authentication attempts a token refresh before a fresh browser has received a refresh cookie. | The auth wrapper starts the normal sign-in flow directly when no session can exist. Existing sessions continue through Umbraco's token validation and renewal. |
@@ -47,12 +50,18 @@ names, so a rebuild that only renames variables still matches. Each patch applie
 only when it finds the expected number of matches: exactly one for a behavior
 change, and one or more for a URL rewrite. Compatibility tests check every registered
 bundle and search pattern against the installed Umbraco assets, including bundles
-the browser scenarios do not load.
+the browser scenarios do not load. They also check, through Umbraco's source maps,
+that each change hits the line of Umbraco's TypeScript it names, and that every
+patched script still parses.
 
 At startup, a file provider reads those installed assets and prepares patched
 copies in memory. Umbraco's static-file middleware serves them at their original
-URLs, with lengths and cache validators for the patched content. The original
-files stay unchanged. Restart the site after changing an upstream asset or patch.
+URLs, with lengths and cache validators for the patched content. A patched file's
+`Last-Modified` is the later of the Umbraco file's time and the time of the commit
+the package was built from, so its validators agree across restarts and servers.
+Patches keep every line in place, so Umbraco's source maps still apply to the patched
+files in the browser's developer tools. The original files stay unchanged. Restart
+the site after changing an upstream asset or patch.
 
 A Tag Helper Component applies the HTML corrections while Razor renders the body
 of Umbraco's backoffice and two basic-auth views. It adds the app's URL attributes
@@ -124,10 +133,10 @@ The `full` case:
 - open the backoffice using a differently cased prefix, import every patched JavaScript module, and check real static-file 304 responses;
 - reload and check that the session is restored through a token refresh;
 - invite an editor and follow the emailed link to the password form;
-- edit rich text, ask the JSON worker to validate invalid code, open the editor's Find widget and check its icon font, and load dark and high-contrast themes;
-- open a block grid with its default stylesheet, persist a custom stylesheet on its data type, and check both stylesheet URLs and the setting's default-stylesheet link;
+- edit rich text with configured stylesheets saved with and without the stylesheet root, ask the JSON worker to validate invalid code, open the editor's Find widget and check its icon font, and load dark and high-contrast themes;
+- open a block grid with its default stylesheet, persist a custom stylesheet and block thumbnails on its data type, and check both stylesheet URLs, the thumbnails in the block catalogue and the data type's block cards, and the setting's default-stylesheet link;
 - create a page, publish it and open it on the front end;
-- preview unpublished changes, save a second draft, and verify that the open preview updates while the public page remains unchanged;
+- preview unpublished changes, save a second draft, verify that the open preview updates while the public page remains unchanged, then end preview from the website's preview badge;
 - upload an image, check every link to it in the backoffice, then open it and a signed resized version returned by the imaging API;
 - select that image through the home page's media picker, publish it, and verify the rendered original and signed crop;
 - check the Delivery API's route and media URLs;
@@ -143,7 +152,9 @@ that the login script's version matches the served bytes. Middleware tests cover
 normal response compression, request-path restoration and startup version warnings;
 file-provider tests verify that missing patches are reported during startup only.
 URL tests cover prefix boundaries, signed queries and fragments, import maps and
-OAuth callbacks without starting a site. The IIS-style case observes an actual
+OAuth callbacks without starting a site. A source scan reads Umbraco's TypeScript from
+the shipped source maps and requires every URL construction that could lose the virtual
+path to be patched or reviewed. The IIS-style case observes an actual
 EventSource open event for both the backoffice server-events hub and the preview
 hub. Each site has image signing enabled with a fresh test key.
 

@@ -4,6 +4,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
+    <!-- Parses the patched scripts, so a broken replacement fails without starting a browser. -->
+    <PackageVersion Include="Acornima" Version="1.9.2" />
     <PackageVersion Include="Microsoft.Playwright" Version="1.64.1" />
     <PackageVersion Include="Umbraco.Cms" Version="[$(UmbracoVersion)]" />
     <!-- The end-to-end site test mirrors `dotnet new umbraco` with the starter kit. -->

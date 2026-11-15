@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Reflection;
 using System.Text;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
@@ -9,48 +11,37 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 /// <summary>Prepares corrected assets once, before Umbraco's static-file middleware is built.</summary>
 internal sealed class BackOfficeAssetFileProvider : IFileProvider
 {
+    /// <summary>When the package's source was committed, or <see cref="DateTimeOffset.MinValue"/> for a build outside Git.</summary>
+    internal static readonly DateTimeOffset SourceTimestamp = DateTimeOffset.TryParse(
+        typeof(BackOfficeAssetFileProvider).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => attribute.Key == "SourceTimestamp")?.Value,
+        CultureInfo.InvariantCulture, DateTimeStyles.None, out var timestamp) ? timestamp : DateTimeOffset.MinValue;
+
     private readonly IFileProvider _inner;
     private readonly Dictionary<string, IFileInfo> _patched = new(StringComparer.OrdinalIgnoreCase);
 
     public BackOfficeAssetFileProvider(IFileProvider inner, IBackOfficePathGenerator paths, string prefix, ILogger logger)
     {
         _inner = inner;
-        // These are newly generated files. Static-file validators must describe them, not the
-        // original bundles, whose timestamp and size may survive a change to a patch.
-        var modified = DateTimeOffset.UtcNow;
-        foreach (var module in BackOfficeAssetPatches.Modules)
+        var context = new BackOfficeAssetPatches.PatchContext(prefix, paths.BackOfficePath, paths.BackOfficeAssetsPath);
+        foreach (var patch in BackOfficeAssetPatches.Patches)
         {
-            var directory = module[..module.LastIndexOf('/')];
-            var matches = inner.GetDirectoryContents(BackOfficeAssetPatches.AssetsRoot + directory)
-                .Where(file => !file.IsDirectory && string.Equals(
-                    BackOfficeAssetPatches.NormalizeModulePath(directory + "/" + file.Name), module, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-            if (matches.Length != 1)
+            var files = BackOfficeAssetPatches.Locate(inner, patch);
+            if (files.Length != 1)
             {
-                logger.LogWarning("Expected one Umbraco bundle for {Module}, found {Count}. The application virtual path fix cannot patch it.",
-                    module, matches.Length);
+                logger.LogWarning("Expected one Umbraco file for {Path}, found {Count}. The application virtual path fix cannot patch it.",
+                    patch.Path, files.Length);
                 continue;
             }
 
-            Add(BackOfficeAssetPatches.AssetsRoot + directory + "/" + matches[0].Name, matches[0],
-                source => BackOfficeAssetPatches.PatchModule(module, source, paths.BackOfficeAssetsPath, Unapplied));
-        }
-
-        Add("/umbraco/login/login.js", inner.GetFileInfo("/umbraco/login/login.js"),
-            source => BackOfficeAssetPatches.PatchLoginScript(source, prefix, paths.BackOfficePath, Unapplied));
-        Add("/umbraco/website/nonodes.css", inner.GetFileInfo("/umbraco/website/nonodes.css"),
-            source => BackOfficeAssetPatches.PatchWebsiteStyles(source, Unapplied));
-
-        void Add(string path, IFileInfo file, Func<string, string> patch)
-        {
-            if (!file.Exists)
-            {
-                logger.LogWarning("Umbraco asset {Path} is missing. The application virtual path fix cannot patch it.", path);
-                return;
-            }
-            using var reader = new StreamReader(file.CreateReadStream());
-            var bytes = Encoding.UTF8.GetBytes(patch(reader.ReadToEnd()));
-            _patched.Add(path, new PatchedFile(file.Name, bytes, modified));
+            var (path, file) = files[0];
+            // Physical files open unbuffered, so read in large blocks: StreamReader's 1 KB default made
+            // reading the patched bundles most of their preparation time.
+            using var reader = new StreamReader(file.CreateReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 16);
+            var bytes = Encoding.UTF8.GetBytes(BackOfficeAssetPatches.Patch(patch, reader.ReadToEnd(), context, Unapplied));
+            // Cache validators must change with the bytes, yet agree across restarts and servers. New bytes come
+            // from a newer Umbraco file or package, and a different application path changes the URL instead.
+            _patched.Add(path, new PatchedFile(file.Name, bytes, file.LastModified > SourceTimestamp ? file.LastModified : SourceTimestamp));
         }
 
         void Unapplied(string resource, string reason)

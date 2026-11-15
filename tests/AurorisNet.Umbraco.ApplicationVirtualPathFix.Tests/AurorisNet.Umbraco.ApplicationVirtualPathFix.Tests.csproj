@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Acornima" />
     <PackageReference Include="Microsoft.Playwright" />
     <PackageReference Include="Umbraco.Cms" />
     <PackageReference Include="Umbraco.Cms.DevelopmentMode.Backoffice" />

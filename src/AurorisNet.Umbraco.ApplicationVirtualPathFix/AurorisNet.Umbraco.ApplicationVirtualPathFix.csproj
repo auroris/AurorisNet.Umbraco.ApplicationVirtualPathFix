@@ -43,4 +43,25 @@
     <None Include="../../LICENSE" Pack="true" PackagePath="/" />
     <Content Update="appsettings-schema*.json;umbraco-package-schema.json" Pack="false" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
   </ItemGroup>
+  <!--
+    Patched files are served with the newer of Umbraco's file time and this commit's time as Last-Modified, so their
+    cache validators agree across restarts and servers yet change with each release. Pass SourceTimestamp to override.
+  -->
+  <Target Name="AddSourceTimestamp" BeforeTargets="GetAssemblyAttributes">
+    <!-- cmd reads %% as a literal %; sh does not. -->
+    <Exec Condition="'$(SourceTimestamp)' == '' AND '$(OS)' == 'Windows_NT'" Command="git log -1 --format=%25%25cI" EchoOff="true"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="SourceTimestamp" />
+    </Exec>
+    <Exec Condition="'$(SourceTimestamp)' == '' AND '$(OS)' != 'Windows_NT'" Command="git log -1 --format=%25cI" EchoOff="true"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="SourceTimestamp" />
+    </Exec>
+    <ItemGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(SourceTimestamp)', '^\d{4}-\d\d-\d\dT[^;]+$'))">
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>SourceTimestamp</_Parameter1>
+        <_Parameter2>$(SourceTimestamp)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
 </Project>

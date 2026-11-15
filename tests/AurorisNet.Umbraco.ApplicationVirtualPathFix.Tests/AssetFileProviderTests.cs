@@ -19,9 +19,14 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
     [Fact]
     public async Task Prepared_assets_have_their_own_bytes_and_metadata_and_leave_originals_intact()
     {
-        var started = DateTimeOffset.UtcNow;
         var provider = CreateProvider();
-        foreach (var path in assets.ModulePaths().Concat([Login, WebsiteCss]))
+        // Another server, or the same one after a restart, must offer the same cache validators.
+        var restarted = CreateProvider();
+        // The build records when the package's source was committed.
+        Assert.NotEqual(DateTimeOffset.MinValue, BackOfficeAssetFileProvider.SourceTimestamp);
+        var paths = assets.PatchedPaths();
+        Assert.Equal(BackOfficeAssetPatches.Patches.Length, paths.Length);
+        foreach (var path in paths)
         {
             var original = assets.Files.GetFileInfo(path);
             var originalBytes = await ReadAsync(original);
@@ -34,7 +39,11 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
             Assert.Equal(original.Name, file.Name);
             Assert.Null(file.PhysicalPath); // SendFile must read the patched stream, not the original disk file.
             Assert.Equal(bytes.LongLength, file.Length);
-            Assert.InRange(file.LastModified, started, DateTimeOffset.UtcNow);
+            // New bytes come from a newer Umbraco file or package, so the later of the two times changes with them.
+            Assert.Equal(original.LastModified > BackOfficeAssetFileProvider.SourceTimestamp ? original.LastModified
+                : BackOfficeAssetFileProvider.SourceTimestamp, file.LastModified);
+            Assert.Equal(file.LastModified, restarted.GetFileInfo(path).LastModified);
+            Assert.Equal(file.Length, restarted.GetFileInfo(path).Length);
             Assert.Same(file, provider.GetFileInfo(path.TrimStart('/')));
             await using var first = file.CreateReadStream();
             await using var second = file.CreateReadStream();

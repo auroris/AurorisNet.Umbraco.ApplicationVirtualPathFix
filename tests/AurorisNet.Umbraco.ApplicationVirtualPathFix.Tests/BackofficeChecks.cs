@@ -24,23 +24,32 @@ public sealed partial class SiteEndToEndTests
         Assert.StartsWith(site.Url("/umbraco/backoffice/").AbsolutePath, new Uri(stylesheet.Url).AbsolutePath);
         await Expect(page.Locator("umb-property-editor-ui-block-grid")).ToBeVisibleAsync();
 
-        // Persist the setting through the same authenticated API as the data-type editor.
+        // Persist the settings through the same authenticated API as the data-type editor. Thumbnails
+        // are saved as the static file picker saves them, including the web root folder.
         Directory.CreateDirectory(Path.Combine(site.Root, "wwwroot", "css"));
         await File.WriteAllTextAsync(Path.Combine(site.Root, "wwwroot", "css", "test-grid.css"),
             ".umb-block-grid { --test-layout-stylesheet: loaded; }", TestContext.Current.CancellationToken);
+        Directory.CreateDirectory(Path.Combine(site.Root, "wwwroot", "images"));
+        await File.WriteAllTextAsync(Path.Combine(site.Root, "wwwroot", "images", "test-thumbnail.svg"),
+            """<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"><rect width="40" height="30" fill="#3544b1"/></svg>""",
+            TestContext.Current.CancellationToken);
         var original = await page.EvaluateAsync<JsonElement>("""
             async id => {
               const { DataTypeService } = await import('@umbraco-cms/backoffice/external/backend-api');
               const result = await DataTypeService.getDataTypeById({ path: { id } });
               if (result.error) throw new Error(JSON.stringify(result.error));
               const data = result.data;
-              const updated = { ...data, values: data.values.filter(value => value.alias !== 'layoutStylesheet') };
+              const blocks = data.values.find(value => value.alias === 'blocks');
+              if (!blocks?.value?.length) throw new Error('The block grid has no block types.');
+              const updated = { ...data, values: data.values.filter(value => value.alias !== 'layoutStylesheet' && value.alias !== 'blocks') };
               updated.values.push({ alias: 'layoutStylesheet', value: '/css/test-grid.css' });
+              updated.values.push({ ...blocks, value: blocks.value.map(block => ({ ...block, thumbnail: '/wwwroot/images/test-thumbnail.svg' })) });
               const saved = await DataTypeService.putDataTypeById({ path: { id }, body: updated });
               if (saved.error) throw new Error(JSON.stringify(saved.error));
               return data;
             }
             """, dataType.Key.ToString());
+        var thumbnail = site.Url("/images/test-thumbnail.svg").ToString();
         try
         {
             var custom = await page.RunAndWaitForResponseAsync(() => page.ReloadAsync(),
@@ -48,7 +57,13 @@ public sealed partial class SiteEndToEndTests
             Assert.True(custom.Ok);
             Assert.Equal(site.Url("/css/test-grid.css").AbsolutePath, new Uri(custom.Url).AbsolutePath);
 
+            // The block catalogue shows each block type's thumbnail.
+            await page.Locator("umb-block-grid-entries #createButton uui-button[look='placeholder']").First.ClickAsync();
+            await AssertImageLoadsAsync(page.Locator("umb-block-catalogue-modal uui-card-block-type img").First, thumbnail);
+
+            // So do the block type cards in the data type's settings.
             await page.GotoAsync(site.Url($"/umbraco/section/settings/workspace/data-type/edit/{dataType.Key}").ToString());
+            await AssertImageLoadsAsync(page.Locator("umb-block-type-card img").First, thumbnail);
             var link = page.GetByRole(AriaRole.Link, new() { Name = "Link to default layout stylesheet", Exact = true });
             await Expect(link).ToBeVisibleAsync();
             var href = await link.GetAttributeAsync("href");
@@ -64,6 +79,13 @@ public sealed partial class SiteEndToEndTests
                 }
                 """, new { id = dataType.Key.ToString(), json = original.GetRawText() });
         }
+    }
+
+    private static async Task AssertImageLoadsAsync(ILocator image, string url)
+    {
+        await Expect(image).ToHaveAttributeAsync("src", url, new() { Timeout = 30_000 });
+        // decode() rejects when the image cannot be loaded.
+        await image.EvaluateAsync("image => image.decode()");
     }
 
     private static async Task CheckServerContextAsync(IPage page, TestSite site)
@@ -83,8 +105,10 @@ public sealed partial class SiteEndToEndTests
     {
         await using var assets = new AssetPatchTests.Assets();
         var root = site.Services.GetRequiredService<IBackOfficePathGenerator>().BackOfficeAssetsPath;
-        var paths = assets.ModulePaths().Select(path => root + path[BackOfficeAssetPatches.AssetsRoot.Length..]).ToArray();
-        Assert.Equal(BackOfficeAssetPatches.Modules.Count(), paths.Length);
+        var backOffice = BackOfficeAssetPatches.AssetsRoot + "/";
+        var paths = assets.PatchedPaths().Where(path => path.StartsWith(backOffice, StringComparison.Ordinal))
+            .Select(path => root + path[BackOfficeAssetPatches.AssetsRoot.Length..]).ToArray();
+        Assert.Equal(BackOfficeAssetPatches.Patches.Count(patch => patch.Path.StartsWith(backOffice, StringComparison.Ordinal)), paths.Length);
         await page.EvaluateAsync("""
             async paths => {
               for (const path of paths.filter(path => path.endsWith('.js'))) {

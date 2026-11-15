@@ -318,15 +318,25 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 
     private static async Task CheckEditorsAndThemesAsync(IPage page, TestSite site)
     {
+        // Configured rich text stylesheets: one relative to the stylesheet root, as the picker saves it,
+        // and one that includes the root, which Umbraco also accepts.
+        string[] stylesheets = ["test-rte.css", "test-rte-root.css"];
+        Directory.CreateDirectory(Path.Combine(site.Root, "wwwroot", "css"));
+        foreach (var name in stylesheets)
+            await File.WriteAllTextAsync(Path.Combine(site.Root, "wwwroot", "css", name), "p { --test-rte-stylesheet: loaded; }",
+                TestContext.Current.CancellationToken);
+        var configured = stylesheets.Select(name => page.WaitForResponseAsync(response => new Uri(response.Url).AbsolutePath.EndsWith("/" + name))).ToArray();
         var css = page.WaitForResponseAsync(response => new Uri(response.Url).AbsolutePath.EndsWith("/css/rte-content.css"));
         await page.EvaluateAsync("""
             async () => {
               await import('@umbraco-cms/backoffice/tiptap');
               await import('@umbraco-cms/backoffice/code-editor');
+              const { UmbPropertyEditorConfigCollection } = await import('@umbraco-cms/backoffice/property-editor');
               const container = document.createElement('div');
               container.id = 'test-editors';
               container.style.cssText = 'position:fixed;inset:80px 20px 20px;z-index:10000;background:white;overflow:auto';
               const rte = document.createElement('umb-input-tiptap');
+              rte.configuration = new UmbPropertyEditorConfigCollection([{ alias: 'stylesheets', value: ['/test-rte.css', '/css/test-rte-root.css'] }]);
               rte.value = '<p>Initial text</p>';
               const code = document.createElement('umb-code-editor');
               code.language = 'json'; code.code = '{"invalid": }';
@@ -338,6 +348,11 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         var stylesheet = await css;
         Assert.True(stylesheet.Ok);
         Assert.StartsWith(site.Url("/umbraco/backoffice/").AbsolutePath, new Uri(stylesheet.Url).AbsolutePath);
+        foreach (var (response, name) in (await Task.WhenAll(configured)).Zip(stylesheets))
+        {
+            Assert.True(response.Ok, $"{response.Url} returned HTTP {response.Status}");
+            Assert.Equal(site.Url("/css/" + name).AbsolutePath, new Uri(response.Url).AbsolutePath);
+        }
         var richText = page.Locator("#test-editors umb-input-tiptap [contenteditable=true]");
         await richText.FillAsync("Edited rich text");
         await Expect(richText).ToHaveTextAsync("Edited rich text");
@@ -487,6 +502,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 
         // Preview must render the unpublished draft, rather than accidentally opening the live page.
         var draftTitle = pageName + " unpublished draft";
+        var updatedTitle = pageName + " updated draft";
         await page.GetByRole(AriaRole.Textbox, new() { Name = "Page Title" }).First.FillAsync(draftTitle);
         var preview = await page.RunAndWaitForPopupAsync(() =>
             page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.SaveAndPreview']").ClickAsync());
@@ -512,7 +528,6 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             await Expect(frame.Locator("body")).ToContainTextAsync(draftTitle, new() { Timeout = 30_000 });
             // Saving another draft should refresh the already-open frame through SignalR,
             // including the IIS case where WebSockets are unavailable.
-            var updatedTitle = pageName + " updated draft";
             await page.GetByRole(AriaRole.Textbox, new() { Name = "Page Title" }).First.FillAsync(updatedTitle);
             await page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.Save']").ClickAsync();
             await Expect(preview.FrameLocator("iframe").Locator("body")).ToContainTextAsync(updatedTitle, new() { Timeout = 30_000 });
@@ -524,6 +539,28 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         finally
         {
             await preview.CloseAsync();
+        }
+
+        // While preview is active, the website shows a badge whose End preview button calls the
+        // management API and reloads the page, which must then render without preview.
+        var website = await page.Context.NewPageAsync();
+        try
+        {
+            await website.GotoAsync(url.ToString());
+            var end = website.Locator("umb-website-preview button.end");
+            await Expect(end).ToBeVisibleAsync(new() { Timeout = 30_000 });
+            var reloaded = website.WaitForResponseAsync(response => response.Request.IsNavigationRequest);
+            var ended = await website.RunAndWaitForResponseAsync(() => end.ClickAsync(),
+                response => response.Request.Method == "DELETE" && new Uri(response.Url).AbsolutePath.EndsWith("/management/api/v1/preview"));
+            Assert.True(ended.Ok, $"Ending preview returned HTTP {ended.Status}");
+            Assert.Equal(site.Url("/umbraco/management/api/v1/preview").AbsolutePath, new Uri(ended.Url).AbsolutePath);
+            Assert.True((await reloaded).Ok);
+            await Expect(website.Locator("umb-website-preview")).ToHaveCountAsync(0);
+            Assert.DoesNotContain(updatedTitle, await website.ContentAsync());
+        }
+        finally
+        {
+            await website.CloseAsync();
         }
     }
 
