@@ -51,10 +51,12 @@ copies in memory. Umbraco's static-file middleware serves them at their original
 URLs, with lengths and cache validators for the patched content. The original
 files stay unchanged. Restart the site after changing an upstream asset or patch.
 
-The response middleware buffers only backoffice and login HTML pages, whose URLs
-and session hints depend on the request. JavaScript, CSS, API calls and SignalR's
-WebSocket, Server-Sent Events and long-polling transports pass through that
-middleware without buffering or changes to `Accept-Encoding`.
+A Tag Helper Component applies the HTML corrections while Razor renders the body
+of Umbraco's backoffice and two basic-auth views. It adds the app's URL attributes
+and session hint and corrects basic-auth form actions. Other views are untouched.
+The package does not replace response streams or alter `Accept-Encoding`.
+The login view's existing `asp-append-version` versions the patched script bytes;
+no additional query parameter is needed.
 
 ## Hosting and compatibility
 
@@ -74,11 +76,10 @@ Kestrel uses the same setting to establish the path base. Route only the prefix 
 the site; Kestrel otherwise also answers unprefixed URLs.
 
 An existing host-supplied path base is preserved, including when a content slug
-repeats the application prefix. Patched static files use normal ASP.NET Core response
-compression. Register `UseResponseCompression()` **before** `UseUmbraco()` to also
-compress the rewritten HTML pages. For those pages only, the package suppresses
-compression registered later in the pipeline. Precompressed HTML from custom
-handlers passes through unchanged.
+repeats the application prefix. Patched static files and rendered HTML use normal
+ASP.NET Core response compression. Register `UseResponseCompression()` before the
+static-file and MVC handlers, normally before `UseUmbraco()`. The package has no
+special compression-ordering requirement.
 
 Under a virtual path, `server-url` comes from the request's scheme and host. Behind
 a reverse proxy or load balancer, apply `X-Forwarded-Proto` and `X-Forwarded-Host`
@@ -131,16 +132,16 @@ The `full` case:
 The other cases reuse only the steps relevant to their hosting risks; they do not
 repeat the front-end crawl, email, editor, stylesheet or media-upload journey.
 File-provider tests check the prepared bytes, lengths, HEAD requests, conditional
-responses and byte ranges through the real static-file middleware. Focused
-middleware tests cover response-compression ordering, conditional responses,
-precompressed content, request and stream restoration, pass-through responses and
-session hints with custom cookie settings. Middleware tests also check startup
-version warnings; file-provider tests verify that missing patches are reported
-during startup only. URL tests cover prefix boundaries, signed queries and fragments,
-import maps and OAuth callbacks without starting a site. The IIS-style case observes
-an actual EventSource open event
-for both the backoffice server-events hub and the preview hub. Each site has image
-signing enabled with a fresh test key.
+responses and byte ranges through the real static-file middleware. Component tests
+use the real body Tag Helper to check view scoping, URL attributes, basic-auth forms,
+session hints and custom cookie settings. The full browser journey also verifies
+that the login script's version matches the served bytes. Middleware tests cover
+normal response compression, request-path restoration and startup version warnings;
+file-provider tests verify that missing patches are reported during startup only.
+URL tests cover prefix boundaries, signed queries and fragments, import maps and
+OAuth callbacks without starting a site. The IIS-style case observes an actual
+EventSource open event for both the backoffice server-events hub and the preview
+hub. Each site has image signing enabled with a fresh test key.
 
 Browser console errors, uncaught JavaScript exceptions, failed requests and HTTP
 errors fail the test, as do server errors and package warnings. One expected response

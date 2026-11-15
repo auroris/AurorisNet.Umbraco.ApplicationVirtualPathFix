@@ -85,7 +85,7 @@ public sealed class UrlTests
         Assert.Equal("//cdn.test/dependency.js", result.Scopes["https://cdn.test/"]["dependency"]);
         Assert.Equal("/portal/umbraco/backoffice/packages/core/auth/index.js",
             result.Imports["@aurorisnet/umbraco-application-virtual-path-fix/upstream-auth"]);
-        Assert.Equal("/portal/App_Plugins/AurorisNet.Umbraco.ApplicationVirtualPathFix/auth.js?v=" + BackOfficeAppUnderVirtualPath.BuildVersion,
+        Assert.Equal("/portal/App_Plugins/AurorisNet.Umbraco.ApplicationVirtualPathFix/auth.js?v=" + BackOfficePaths.BuildVersion,
             result.Imports["@umbraco-cms/backoffice/auth"]);
 
         Assert.Equal("/App_Plugins/Example/main.js", source.Imports["plugin"]);

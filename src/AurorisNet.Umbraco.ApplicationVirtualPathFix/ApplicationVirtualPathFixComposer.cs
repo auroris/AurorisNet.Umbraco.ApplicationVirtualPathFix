@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -45,6 +46,7 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
     {
         var services = builder.Services;
         services.AddVirtualPathHosting();
+        services.AddTransient<ITagHelperComponent, BackOfficeBodyTagHelperComponent>();
         services.Configure<UmbracoPipelineOptions>(options => options.PipelineFilters.Insert(0, new UmbracoPipelineFilter(
             Name,
             prePipeline: app =>
@@ -59,7 +61,6 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
                     app.UseWhen(context => !context.Request.PathBase.HasValue, branch => branch.UsePathBase(prefix));
                 }
                 app.UseUmbracoPathsUnderPathBase();
-                app.UseBackOfficeAppUnderVirtualPath();
             },
             postPipeline: app => app.UseMediaUnderPathBase())));
         services.Replace(ServiceDescriptor.Singleton<IBackOfficePathGenerator, BackOfficePaths>());
@@ -144,7 +145,7 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
             var imports = Rewrite(map.Imports, virtualPath);
             // Keep the original module (and its context tokens) shared by the wrapper's re-exports.
             imports["@aurorisnet/umbraco-application-virtual-path-fix/upstream-auth"] = imports["@umbraco-cms/backoffice/auth"];
-            imports["@umbraco-cms/backoffice/auth"] = virtualPath + "/App_Plugins/AurorisNet.Umbraco.ApplicationVirtualPathFix/auth.js?v=" + BackOfficeAppUnderVirtualPath.BuildVersion;
+            imports["@umbraco-cms/backoffice/auth"] = virtualPath + "/App_Plugins/AurorisNet.Umbraco.ApplicationVirtualPathFix/auth.js?v=" + BackOfficePaths.BuildVersion;
             Dictionary<string, Dictionary<string, string>>? scopes = null;
             if (map.Scopes is not null)
             {

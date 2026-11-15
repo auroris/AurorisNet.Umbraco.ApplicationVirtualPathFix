@@ -9,13 +9,15 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 /// <summary>Invalidate patched backoffice modules when either Umbraco or this package changes.</summary>
 internal sealed class BackOfficePaths : IBackOfficePathGenerator
 {
+    internal static readonly string BuildVersion = typeof(BackOfficePaths).Assembly.ManifestModule.ModuleVersionId.ToString("N");
+
     public BackOfficePaths(IHostingEnvironment environment, IUmbracoVersion version)
     {
         var original = new UmbracoBackOfficePathGenerator(environment, version);
         BackOfficePath = original.BackOfficePath;
         BackOfficeVirtualDirectory = original.BackOfficeVirtualDirectory;
         BackOfficeCacheBustHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-            original.BackOfficeCacheBustHash + BackOfficeAppUnderVirtualPath.BuildVersion)));
+            original.BackOfficeCacheBustHash + BuildVersion)));
     }
 
     public string BackOfficePath { get; }

@@ -61,20 +61,23 @@ not try to infer URL behavior from arbitrary string concatenations. Patch checks
 and the browser journey cover the known URL corrections.
 
 `UrlTests` checks media-prefix boundaries, signed queries and fragments, import-map
-entries and scopes, and OAuth callbacks without starting a site. Middleware checks
-also exercise stream and request-state restoration, pass-through responses, UTF-8
-content lengths and session hints with configured cookie names and SameSite modes.
+entries and scopes, and OAuth callbacks without starting a site. `BackOfficeBodyTests`
+uses the real body Tag Helper, including DI and view-context activation, to check
+attributes, form actions, view scoping and session hints with configured cookie names
+and SameSite modes. Middleware checks cover request-path restoration and version
+warnings.
 
 `AssetFileProviderTests` checks that startup prepares patched copies without changing
 the original files, and that repeated reads neither repeat patching nor log more
 warnings. A small HTTP host exercises the real static-file handler's content lengths,
 HEAD requests, conditional responses and byte ranges. Middleware tests check that
-the prepared assets compress correctly with either middleware ordering. These checks
-do not install Umbraco or start another starter-kit site.
+prepared assets and rendered HTML compress correctly with either middleware ordering.
+These checks do not install Umbraco or start another starter-kit site.
 
-The `full` browser case imports every registered JavaScript module and requests real
-static files with `If-None-Match`. It combines `/SomeTestPath/Nested`, HTTPS,
-external media and `Hosting:Debug=false` in one site. The proxy cases are `proxy`
+The `full` browser case imports every registered JavaScript module, requests real
+static files with `If-None-Match`, and verifies the login script's content version.
+It combines `/SomeTestPath/Nested`, HTTPS, external media and `Hosting:Debug=false`
+in one site. The proxy cases are `proxy`
 and `proxy-root`: the fixture changes the incoming scheme and host,
 strips the prefix, then passes the original values through `UseForwardedHeaders`.
 They model proxy input within Kestrel; they do not start a separate proxy server.

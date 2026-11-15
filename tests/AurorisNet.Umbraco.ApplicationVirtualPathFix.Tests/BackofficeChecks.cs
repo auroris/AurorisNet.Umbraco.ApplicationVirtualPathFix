@@ -1,5 +1,8 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Playwright;
 using Umbraco.Cms.Web.Common.Hosting;
 using Umbraco.Cms.Core.Services;
@@ -107,6 +110,16 @@ public sealed partial class SiteEndToEndTests
             Assert.Equal(HttpStatusCode.NotModified, cached.StatusCode);
             Assert.Empty(await cached.Content.ReadAsByteArrayAsync(ct));
         }
+
+        // The login view's existing asp-append-version must hash the file-provider output.
+        var loginHtml = await http.GetStringAsync(site.Url("/umbraco/login"), ct);
+        var script = Regex.Match(loginHtml, """<script\b[^>]*\bsrc="([^"]*/umbraco/login/login\.js[^"]*)"[^>]*>""");
+        Assert.True(script.Success, "The login page must include its versioned script.");
+        var scriptUrl = new Uri(site.Address, WebUtility.HtmlDecode(script.Groups[1].Value));
+        var query = QueryHelpers.ParseQuery(scriptUrl.Query);
+        Assert.False(query.ContainsKey("avpfix"));
+        var scriptBytes = await http.GetByteArrayAsync(scriptUrl, ct);
+        Assert.Equal(WebEncoders.Base64UrlEncode(SHA256.HashData(scriptBytes)), query["v"].ToString());
     }
 
     private static async Task SignOutAsync(IPage page, TestSite site)
