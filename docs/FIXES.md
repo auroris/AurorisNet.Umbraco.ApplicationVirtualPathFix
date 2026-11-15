@@ -1,4 +1,4 @@
-# Fixes for Umbraco 18.2 and 18.3
+# Fixes for Umbraco 17.5 to 18.3
 
 The package keeps the backoffice's URLs inside the application virtual path
 configured by `Umbraco:CMS:Hosting:ApplicationVirtualPath`. It registers through
@@ -13,12 +13,13 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 | Import maps contain root-absolute core and package URLs. | Root-absolute imports and scopes carry the application prefix, and Umbraco can add its asset hash. |
 | The backoffice app builds API and OAuth URLs from the origin and `/umbraco`. | Under a virtual path the app's server URL is the browser's origin plus the configured path, and its backoffice path includes the configured path too. OAuth callbacks are registered with that prefix. Sites at the root keep Umbraco's defaults. |
 | A backoffice bookmark uses different casing for the application prefix, which the server accepts but the SPA router does not. | Backoffice HTML navigations redirect to the configured prefix casing, retaining the query string. |
-| The slim login script uses root URLs for login, two-factor verification and its shared API client. | The served script uses the application prefix for those requests, including public package manifests and password resets. |
+| The slim login script uses root URLs for login, two-factor verification and its shared API client, and in Umbraco 17.5, 17.6 and 18.0 for the password-reset and invitation requests of its own API client. | The served script uses the application prefix for those requests, including public package manifests, password resets and invitations. |
 | Password-reset and invitation emails link to `/umbraco/login` at the host root. | The emailed links include the application path. |
 | Media stored outside `wwwroot` (an absolute `UmbracoMediaPhysicalRootPath`, or a provider such as Azure Blob Storage) is mounted only at the prefixed path, which requests under a path base never match. | Media is served under the prefix from any media file system, and ImageSharp crops and resizes apply to it. |
 | The thumbnail URL assembler adds the prefix again to signed media URLs, invalidating their image-processing signatures. | Already-prefixed media paths retain one prefix, their original query string and any URL fragment. |
-| Basic authentication, the OpenAPI documents and the management API contract compare `Request.Path` with a path that includes the virtual path. With `RedirectToLoginPage`, every visitor is redirected in a loop. | Those requests see the path shape Umbraco expects, so the basic-authentication login page and the OpenAPI documents work under the prefix. |
+| Basic authentication, the OpenAPI documents and the management API contract compare `Request.Path` with a path that includes the virtual path. With `RedirectToLoginPage`, every visitor is redirected in a loop. | Those requests see the path shape Umbraco expects, so the basic-authentication login page and the OpenAPI documents work under the prefix: Swashbuckle's under `/umbraco/swagger` on Umbraco 17, and those under `/umbraco/openapi` on Umbraco 18. |
 | The logo in the header's system-information popover uses a root-absolute URL. | The logo loads under the configured application prefix and asset hash. |
+| After sign-out, the backoffice's sign-in view first requests its logos from the host root, before it reads the server URL. | The view starts with the site's URL, so its logos load under the prefix from the first render. |
 | The error screen and installer/upgrader layout load their illustration from the host root. | Both load the illustration from the configured backoffice asset root. |
 | The backoffice stylesheet loads Monaco's codicon font from the host root. | The font loads relative to the stylesheet under the application prefix, including icons in the editor's Find widget. |
 | The block grid editor loads its default layout stylesheet from `/umbraco/backoffice/css/...`, and resolves a custom layout stylesheet's site path against the host root. | Both stylesheets load under the prefix. |
@@ -79,9 +80,10 @@ no additional query parameter is needed.
 
 ## Hosting and compatibility
 
-Use the package with **Umbraco 18.2.0 to 18.3.1 on .NET 10**. It depends on that
-range of `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`, and every release
-in it passes the fast and browser tests before a package is published. The package
+Use the package with **Umbraco 17.5.0 to 18.3.1 on .NET 10**. It depends on that
+range of `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`, and every Umbraco
+release in it passed the fast and browser tests when it was added, and again after
+any change that might affect it. The package
 applies the patches for the site's own Umbraco release. Restore fails with a version
 conflict (NU1107) on any other release, so upgrade the package when you upgrade
 Umbraco beyond the range. A site that references those two packages directly at
@@ -89,6 +91,12 @@ another version gets only a NuGet warning (NU1608); the package then logs a warn
 at startup, and the health check reports the unsupported version. Asset preparation
 also logs warnings for missing or ambiguous bundles, and for each patch that it skips
 because its pattern no longer matches the expected number of times.
+
+An Umbraco release published after a package release can fall inside its range, such
+as a later Umbraco 17 release. Restore accepts it before it has been tested, and the
+package applies the patches for the nearest earlier release of the same major version.
+If Umbraco changed those files, the warnings above report each patch that no longer
+applies.
 
 Requests must reach the site with the prefix still in the path, or with the path
 base already set: by IIS for a child application, or by
@@ -181,10 +189,16 @@ EventSource open event for both the backoffice server-events hub and the preview
 hub. Each site has image signing enabled with a fresh test key.
 
 Browser console errors, uncaught JavaScript exceptions, failed requests and HTTP
-errors fail the test, as do server errors and package warnings. One expected response
-is recorded separately: without WebSockets, Umbraco revokes the session before
-SignalR sends its SSE close message, causing a 401 on the server-event hub's POST
-during sign-out. This also occurs on a root site. The starter kit's external
+errors fail the test, as do server errors and package warnings. Two expected
+responses during sign-out are recorded separately, and both also occur on a root
+site. Without WebSockets, Umbraco revokes the session before SignalR sends its SSE
+close message, causing a 401 on the server-event hub's POST. A management API GET
+that is still loading when the session ends, such as the content tree's, also gets a
+401; a request outside the virtual path would get a 404 instead. Two Umbraco bugs
+that have nothing to do with the virtual path are ignored on the releases that have
+them: the tags input of Umbraco 17.5 and 18.0 can throw while it re-renders, which
+17.6 and 18.1 fixed, and in every supported release a document workspace controller
+can read a variant's language before the languages have loaded. The starter kit's external
 dependencies receive deterministic local responses; unexpected external requests
 fail. Browser routing disables its HTTP
 cache, so conditional-response behavior is tested separately with an HTTP client.

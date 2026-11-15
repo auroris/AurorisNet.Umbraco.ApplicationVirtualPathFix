@@ -1,4 +1,7 @@
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
@@ -38,6 +41,54 @@ public sealed class SupportedReleasesTests
                 Assert.True(Version.Parse(from) < Version.Parse(before), $"{patch}: From must come before Before.");
             Assert.True(UmbracoUnderTest.SupportedReleases.Any(patch.AppliesTo), $"{patch} applies to no supported release.");
         }
+    }
+
+    /// <summary>
+    /// Checks that every type and member the package's compiled code refers to exists in the Umbraco release under test.
+    /// The package compiles against the oldest supported release, so a member that a later release removed or changed,
+    /// as Umbraco 18 gave the pipeline filter's full constructor two more parameters, would otherwise fail only when the
+    /// code that uses it runs. References that need the generic arguments of the code that makes them are skipped. Each
+    /// of the package's types must also load, which fails when an Umbraco interface it implements gained a member without
+    /// a default implementation.
+    /// </summary>
+    [Fact]
+    public void Every_type_and_member_the_package_uses_exists()
+    {
+        var assembly = typeof(ApplicationVirtualPathFixComposer).Assembly;
+        using var stream = File.OpenRead(assembly.Location);
+        using var pe = new PEReader(stream);
+        var metadata = pe.GetMetadataReader();
+        var tokens = metadata.TypeReferences.Select(handle => MetadataTokens.GetToken(handle))
+            .Concat(metadata.MemberReferences.Select(handle => MetadataTokens.GetToken(handle)));
+        var missing = new List<string>();
+        foreach (var token in tokens)
+        {
+            try
+            {
+                assembly.ManifestModule.ResolveMember(token);
+            }
+            catch (Exception exception) when (exception is TypeLoadException or MissingMemberException or FileNotFoundException)
+            {
+                missing.Add(exception.Message);
+            }
+            catch (ArgumentException)
+            {
+                // The reference uses the generic parameters of its enclosing type or method.
+            }
+        }
+
+        // Loading each of the package's own types checks that its base types and interfaces exist and that it still
+        // implements every member they require.
+        try
+        {
+            assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException exception)
+        {
+            missing.AddRange(exception.LoaderExceptions.Select(loader => loader?.Message ?? "A type failed to load."));
+        }
+
+        Assert.True(missing.Count == 0, $"Umbraco {UmbracoUnderTest.Release} lacks what the package uses:\n" + string.Join('\n', missing));
     }
 
     /// <summary>

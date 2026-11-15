@@ -41,9 +41,11 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
         services.AddSingleton<VirtualPathStatus>();
         builder.HealthChecks().Add<VirtualPathHealthCheck>();
         services.AddTransient<ITagHelperComponent, BackOfficeBodyTagHelperComponent>();
-        services.Configure<UmbracoPipelineOptions>(options => options.PipelineFilters.Insert(0, new UmbracoPipelineFilter(
-            Name,
-            prePipeline: app =>
+        // Umbraco 18 gave the filter's full constructor two more parameters, so the package, compiled against Umbraco 17,
+        // uses the constructor and properties that both versions have.
+        services.Configure<UmbracoPipelineOptions>(options => options.PipelineFilters.Insert(0, new UmbracoPipelineFilter(Name)
+        {
+            PrePipeline = app =>
             {
                 WarnOnUnsupportedUmbracoVersion(app.ApplicationServices);
                 if (VirtualPathHosting.Prefix(app.ApplicationServices.GetRequiredService<IHostingEnvironment>()) is { } prefix)
@@ -64,7 +66,8 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
                 }
                 app.UseUmbracoPathsUnderPathBase();
             },
-            postPipeline: app => app.UseMediaUnderPathBase())));
+            PostPipeline = app => app.UseMediaUnderPathBase(),
+        }));
         services.Replace(ServiceDescriptor.Singleton<IBackOfficePathGenerator, BackOfficePaths>());
         // ManagementApiComposer registers the default URL assembler again after this composer runs. A collection
         // builder registers in UmbracoBuilder.Build(), after every composer, so the decorator wraps the final
@@ -123,7 +126,7 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
     }
 
     /// <summary>
-    /// The Umbraco releases the package supports, such as <c>18.2.0 to 18.3.1</c>, or <see langword="null"/> when the
+    /// The Umbraco releases the package supports, such as <c>17.5.0 to 18.3.1</c>, or <see langword="null"/> when the
     /// build recorded none.
     /// </summary>
     internal static string? SupportedUmbracoVersions

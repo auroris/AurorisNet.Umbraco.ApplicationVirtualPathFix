@@ -1,6 +1,6 @@
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 
-/// <summary>The sign-in page's script.</summary>
+/// <summary>The sign-in page's script and the backoffice's sign-in view.</summary>
 internal static class SignInPatches
 {
     /// <summary>The entries for these files, in the order the patcher reads them.</summary>
@@ -66,6 +66,71 @@ internal static class SignInPatches
             Preamble = """
                 import { umbHttpClient } from '@@umbraco-cms/backoffice/http-client'; umbHttpClient.setConfig({ baseUrl: window.location.origin + @prefix });
                 """,
+        },
+
+        // In 17.5, 17.6 and 18.0 the login app calls the password-reset and invitation APIs through its own copy of the
+        // generated API client instead, created without a base URL, so the requests go to the site root. Each entry
+        // gives that copy the base URL the preamble above gives the shared client.
+        new()
+        {
+            Path = "/umbraco/login/login.js",
+            From = "17.5.0",
+            Before = "17.7.0",
+            Edits = OwnClientBaseUrl,
+        },
+        new()
+        {
+            Path = "/umbraco/login/login.js",
+            From = "18.0.0",
+            Before = "18.1.0",
+            Edits = OwnClientBaseUrl,
+        },
+
+        // The backoffice's own sign-in view, shown after sign-out. It builds the addresses of its logos and background from
+        // the server URL, which it reads from Umbraco's server context only after its first render, so that render
+        // requests them from the site root. The edit starts the view with the site's URL, which the server context then
+        // confirms.
+        new()
+        {
+            Path = "/umbraco/backoffice/packages/core/umb-auth-view.element-????????.js",
+            Edits =
+            [
+                new()
+                {
+                    Origin = new()
+                    {
+                        File = "src/packages/core/auth/components/umb-auth-view.element.ts",
+                        Code = "private _serverUrl = '';",
+                    },
+                    Find = """
+                        this._serverUrl = ""
+                        """,
+                    Replace = """
+                        this._serverUrl = window.location.origin + @prefix
+                        """,
+                    Count = 1,
+                },
+            ],
+        },
+    ];
+
+    /// <summary>The edit that creates the login app's own API client with the site's base URL.</summary>
+    private static AssetEdit[] OwnClientBaseUrl =>
+    [
+        new()
+        {
+            Origin = new()
+            {
+                File = "Umbraco.Web.UI.Login/src/api/client.gen.ts",
+                Code = "export const client = createClient(createConfig<ClientOptions2>());",
+            },
+            Find = """
+                @client = @createClient(@createConfig())
+                """,
+            Replace = """
+                @client = @createClient(@createConfig({ baseUrl: window.location.origin + @prefix }))
+                """,
+            Count = 1,
         },
     ];
 }

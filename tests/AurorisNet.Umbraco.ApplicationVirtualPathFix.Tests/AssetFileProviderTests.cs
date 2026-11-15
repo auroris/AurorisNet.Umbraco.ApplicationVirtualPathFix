@@ -76,14 +76,16 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         var logger = new RecordedWarnings();
         var provider = new BackOfficeAssetFileProvider(new LoginOverride(assets.Files, login), new TestBackOfficePaths(Prefix), Prefix,
             UmbracoUnderTest.Release, logger);
+        // One warning for each edit to login.js, as no edit finds its code in the changed file.
+        var edits = UmbracoUnderTest.Patches.Where(patch => patch.Path == Login).Sum(patch => patch.Edits.Length);
         Assert.Equal(1, login.Reads);
-        Assert.Equal(3, logger.Messages.Count);
-        Assert.Equal(3, logger.Messages.Distinct().Count());
+        Assert.Equal(edits, logger.Messages.Count);
+        Assert.Equal(edits, logger.Messages.Distinct().Count());
         Assert.All(logger.Messages, message => Assert.Contains("login.js", message));
         for (var attempt = 0; attempt < 3; attempt++)
             await ReadAsync(provider.GetFileInfo(Login));
         Assert.Equal(1, login.Reads);
-        Assert.Equal(3, logger.Messages.Count);
+        Assert.Equal(edits, logger.Messages.Count);
     }
 
     /// <summary>

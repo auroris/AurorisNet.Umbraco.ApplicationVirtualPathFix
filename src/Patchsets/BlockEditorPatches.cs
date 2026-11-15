@@ -6,13 +6,55 @@ internal static class BlockEditorPatches
     /// <summary>The entries for these files, in the order the patcher reads them.</summary>
     internal static readonly AssetPatch[] Patches =
     [
-        // The block grid's default layout stylesheet, "/umbraco/backoffice/css/umbraco-blockgridlayout.css". Each minor
-        // release defines it in a shared chunk that the bundler names after a different one of the chunk's modules.
+        // The block grid's default layout stylesheet, "/umbraco/backoffice/css/umbraco-blockgridlayout.css". The bundler
+        // defines it in a shared chunk named after one of the chunk's modules, and that name changes between releases.
+        // Each name has an entry for the Umbraco 17 releases that use it and one for the 18 releases.
+
+        // In 17.5, 17.6, 18.0 and 18.1 the chunk is one of two named constants-????????.js, so Contains picks the one
+        // with the stylesheet.
+        new()
+        {
+            Path = "/umbraco/backoffice/packages/block/constants-????????.js",
+            From = "17.5.0",
+            Before = "17.7.0",
+            Contains = "umbraco-blockgridlayout.css",
+            Source = "src/packages/block/block-grid/context/constants.ts",
+            MovesAssetUrls = true,
+        },
+        new()
+        {
+            Path = "/umbraco/backoffice/packages/block/constants-????????.js",
+            From = "18.0.0",
+            Before = "18.2.0",
+            Contains = "umbraco-blockgridlayout.css",
+            Source = "src/packages/block/block-grid/context/constants.ts",
+            MovesAssetUrls = true,
+        },
+
+        // 17.7 and 18.2.
+        new()
+        {
+            Path = "/umbraco/backoffice/packages/block/data-path-element-data-query.function-????????.js",
+            From = "17.7.0",
+            Before = "17.8.0",
+            Source = "src/packages/block/block-grid/context/constants.ts",
+            MovesAssetUrls = true,
+        },
         new()
         {
             Path = "/umbraco/backoffice/packages/block/data-path-element-data-query.function-????????.js",
             From = "18.2.0",
             Before = "18.3.0",
+            Source = "src/packages/block/block-grid/context/constants.ts",
+            MovesAssetUrls = true,
+        },
+
+        // 17.8 and 18.3 and later.
+        new()
+        {
+            Path = "/umbraco/backoffice/packages/block/data-path-generator-for-element-data.function-????????.js",
+            From = "17.8.0",
+            Before = "18.0.0",
             Source = "src/packages/block/block-grid/context/constants.ts",
             MovesAssetUrls = true,
         },

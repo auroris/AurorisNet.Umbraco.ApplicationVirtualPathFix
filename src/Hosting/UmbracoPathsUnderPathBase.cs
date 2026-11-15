@@ -3,9 +3,8 @@ using Umbraco.Cms.Web.Common.Hosting;
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 
 /// <summary>
-/// Puts the virtual path back onto <c>Request.Path</c> for the Umbraco 18.3.1 features that compare it with a path
-/// that includes the virtual path, when the site runs under a path base (<c>UsePathBase</c>, or an IIS child
-/// application).
+/// Puts the virtual path back onto <c>Request.Path</c> for the Umbraco features that compare it with a path that
+/// includes the virtual path, when the site runs under a path base (<c>UsePathBase</c>, or an IIS child application).
 /// </summary>
 /// <remarks>
 /// Several Umbraco components build paths with <c>GetBackOfficePath()</c>, which includes the application virtual
@@ -16,7 +15,8 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 /// 404.</item>
 /// <item>Basic authentication: the login and two-factor routes, and the middleware's exemption for them. Without the
 /// fix, a site with <c>RedirectToLoginPage</c> redirects every visitor in a loop.</item>
-/// <item>The OpenAPI documents and UI outside production, and the management API contract.</item>
+/// <item>The API documents and UI outside production, which Umbraco 17 serves with Swashbuckle under
+/// <c>/umbraco/swagger</c> and Umbraco 18 under <c>/umbraco/openapi</c>, and the management API contract.</item>
 /// </list>
 /// The middleware restores the expected path for these requests only. The static-file handler serves files under
 /// <c>/umbraco/basic-auth</c> directly, so their paths stay as they are. Each case becomes redundant once Umbraco
@@ -27,6 +27,7 @@ internal static class UmbracoPathsUnderPathBase
     private static readonly PathString AssetsRoot = "/umbraco/backoffice";
     private static readonly PathString BasicAuth = "/umbraco/basic-auth";
     private static readonly PathString OpenApi = "/umbraco/openapi";
+    private static readonly PathString Swagger = "/umbraco/swagger";
     private static readonly PathString ManagementContract = "/umbraco/management/api/openapi.json";
 
     /// <summary>
@@ -96,12 +97,13 @@ internal static class UmbracoPathsUnderPathBase
 
     /// <summary>
     /// Returns whether Umbraco compares <paramref name="path"/> with a path that includes the virtual path: hashed
-    /// backoffice assets, basic-auth routes other than files, the OpenAPI documents and UI, and the management API
-    /// contract.
+    /// backoffice assets, basic-auth routes other than files, the API documents and UI of Umbraco 17 and 18, and the
+    /// management API contract.
     /// </summary>
     private static bool ComparedWithVirtualPath(PathString path, PathString hashedAssets)
         => path.StartsWithSegments(hashedAssets)
             || (path.StartsWithSegments(BasicAuth) && !Path.HasExtension(path.Value))
             || path.StartsWithSegments(OpenApi)
+            || path.StartsWithSegments(Swagger)
             || path.Equals(ManagementContract);
 }

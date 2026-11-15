@@ -10,6 +10,6 @@
     <PackageVersion Include="Umbraco.Cms" Version="[$(UmbracoVersion)]" />
     <!-- The browser test sites match a project created by `dotnet new umbraco` with the starter kit. -->
     <PackageVersion Include="Umbraco.Cms.DevelopmentMode.Backoffice" Version="[$(UmbracoVersion)]" />
-    <PackageVersion Include="Umbraco.TheStarterKit" Version="18.0.0" />
+    <PackageVersion Include="Umbraco.TheStarterKit" Version="$(UmbracoStarterKitVersion)" />
   </ItemGroup>
 </Project>

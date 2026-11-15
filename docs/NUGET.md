@@ -1,6 +1,6 @@
 # Umbraco Application Virtual Path Fix
 
-Backoffice fixes for Umbraco 18 sites hosted under a subdirectory, such as
+Backoffice fixes for Umbraco 17 and 18 sites hosted under a subdirectory, such as
 `/SomeTestPath/umbraco`. Sign-in, backoffice assets, media, dashboard requests and
 session renewal stay under the site's application path.
 
@@ -20,8 +20,9 @@ session renewal stay under the site's application path.
 
 ## Quick start
 
-Add the package to a website running Umbraco 18.2.0 to 18.3.1. The floating version
-picks up the newest release for Umbraco 18:
+Add the package to a website running Umbraco 17.5.0 to 18.3.1. Package versions start
+with the newest Umbraco release they support, so the floating version `18.*` picks up
+the newest release on Umbraco 17 and 18 alike:
 
 ```xml
 <PackageReference Include="AurorisNet.Umbraco.ApplicationVirtualPathFix" Version="18.*" />

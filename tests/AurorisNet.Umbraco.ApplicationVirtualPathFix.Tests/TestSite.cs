@@ -76,6 +76,9 @@ internal sealed class TestSite : IAsyncDisposable
     public const string Password = "VirtualPath!Test5278";
     public const string NewsHeading = "Virtual path dashboard test";
 
+    /// <summary>How many sites this process has started, which matters on Umbraco 17; see <see cref="StartAsync"/>.</summary>
+    private static int _sitesStarted;
+
     private readonly WebApplication _app;
     private readonly DateTimeOffset _startedAt;
     private bool _stopped;
@@ -128,6 +131,13 @@ internal sealed class TestSite : IAsyncDisposable
     /// </summary>
     public static async Task<TestSite> StartAsync(SiteOptions options, CancellationToken cancellationToken, string? artifacts = null)
     {
+        // Umbraco 17's "friendly" extension methods keep the services of the first site that renders a page in static
+        // readonly properties, which cannot be reset, so a later site in the same process would use the first site's
+        // disposed services. Umbraco 18 keeps them in fields that BootAsync clears.
+        if (UmbracoUnderTest.Release.Major < 18 && Interlocked.Increment(ref _sitesStarted) > 1)
+            Assert.Skip("Umbraco 17 keeps the first site's services in static readonly properties, so each browser case "
+                + "needs its own process. tests/Test-UmbracoReleases.ps1 runs them that way; with dotnet test, set "
+                + "AVPF_E2E_CASE to one case.");
         var root = Directory.CreateTempSubdirectory("virtual-path-fix-test-").FullName;
         Directory.CreateDirectory(Path.Combine(root, "wwwroot"));
         Directory.CreateDirectory(Path.Combine(root, "mail"));
@@ -177,7 +187,15 @@ internal sealed class TestSite : IAsyncDisposable
                     }
                     """, cancellationToken);
                 var address = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
-                return new TestSite(app, root, options, address, startedAt) { _artifacts = artifacts };
+                var site = new TestSite(app, root, options, address, startedAt) { _artifacts = artifacts };
+                // The first front-end request compiles the starter kit's views, which can take longer than a browser
+                // navigation waits when several sites start at once. Make that request before any browser does.
+                using (var http = site.CreateHttpClient(followRedirects: false))
+                {
+                    http.Timeout = TimeSpan.FromMinutes(3);
+                    using var _ = await http.GetAsync(site.Url("/"), cancellationToken);
+                }
+                return site;
             }
             catch
             {

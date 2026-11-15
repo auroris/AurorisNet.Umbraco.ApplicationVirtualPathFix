@@ -1,7 +1,7 @@
 <h1 align="center">Umbraco Application Virtual Path Fix</h1>
 
 <p align="center">
-  Backoffice fixes for Umbraco 18 sites hosted under a subdirectory.<br>
+  Backoffice fixes for Umbraco 17 and 18 sites hosted under a subdirectory.<br>
   Keep login, assets, dashboard requests and session renewal under paths such as <code>/SomeTestPath/umbraco</code>.
 </p>
 
@@ -43,7 +43,7 @@ requirements and validation scope.
 
 | Package release | Umbraco | Runtime |
 |---|---|---|
-| 18.3.1.2 and later | 18.2.0 to 18.3.1 | .NET 10 |
+| 18.3.1.2 and later | 17.5.0 to 18.3.1 | .NET 10 |
 | [18.3.1.1](https://www.nuget.org/packages/AurorisNet.Umbraco.ApplicationVirtualPathFix/18.3.1.1) | 18.3.1 | .NET 10 |
 
 On any Umbraco release outside a package's range, restore fails with a version
@@ -53,8 +53,9 @@ branch holds the source of 18.3.1.1.
 
 ## Quick start
 
-Add the package to a website running Umbraco 18.2.0 to 18.3.1. The floating version
-picks up the newest release for Umbraco 18:
+Add the package to a website running Umbraco 17.5.0 to 18.3.1. Package versions start
+with the newest Umbraco release they support, so the floating version `18.*` picks up
+the newest release on Umbraco 17 and 18 alike:
 
 ```xml
 <PackageReference Include="AurorisNet.Umbraco.ApplicationVirtualPathFix" Version="18.*" />
@@ -90,7 +91,7 @@ release, starting at 1.
 | Package version | Meaning |
 |---|---|
 | `18.3.1.1` | Our first release with Umbraco 18.3.1 as the newest supported release. It supports only 18.3.1. |
-| `18.3.1.2` | Our second release with 18.3.1 as the newest supported release. It supports 18.2.0 to 18.3.1. |
+| `18.3.1.2` | Our second release with 18.3.1 as the newest supported release. It supports 17.5.0 to 18.3.1. |
 | `18.3.2.1` | Our first release that adds a newer Umbraco release, such as 18.3.2. The count starts again. |
 
 The Release workflow chooses the next release count and creates a tag such as

@@ -142,7 +142,8 @@ public sealed partial class SiteEndToEndTests
     /// <summary>
     /// Checks that every patched backoffice module imports in the browser from the cache-busted assets path, that three
     /// patched files answer conditional requests with 304, and that the login page's script version is the hash of the
-    /// patched script. Outside debug mode, also checks that backoffice assets are cacheable.
+    /// patched script. Outside debug mode, also checks that backoffice assets are cacheable on the releases where Umbraco
+    /// makes them so.
     /// </summary>
     private static async Task CheckPatchedAssetsAsync(IPage page, TestSite site, CancellationToken ct)
     {
@@ -163,6 +164,8 @@ public sealed partial class SiteEndToEndTests
             """, paths);
 
         using var http = site.CreateHttpClient();
+        // Umbraco 17.6 and 18.1 started serving backoffice assets with a max-age outside debug mode.
+        var cacheable = !site.Options.Debug && UmbracoUnderTest.Release is not ({ Major: 17, Minor: 5 } or { Major: 18, Minor: 0 });
         foreach (var path in new[] { site.Options.Prefix + "/umbraco/login/login.js", root + "/packages/core/manifests.js", root + "/css/umb-css.css" })
         {
             var url = new Uri(site.Address, path);
@@ -170,7 +173,7 @@ public sealed partial class SiteEndToEndTests
             Assert.Equal(HttpStatusCode.OK, original.StatusCode);
             Assert.NotEmpty(await original.Content.ReadAsByteArrayAsync(ct));
             Assert.NotNull(original.Headers.ETag);
-            if (!site.Options.Debug && path.Contains("/backoffice/", StringComparison.Ordinal))
+            if (cacheable && path.Contains("/backoffice/", StringComparison.Ordinal))
                 Assert.True(original.Headers.CacheControl?.MaxAge > TimeSpan.Zero, "Non-debug backoffice assets should be cacheable.");
             using var conditional = new HttpRequestMessage(HttpMethod.Get, url);
             conditional.Headers.IfNoneMatch.Add(original.Headers.ETag);
@@ -277,7 +280,7 @@ public sealed partial class SiteEndToEndTests
         await modal.Locator($"uui-card-media[data-mark='media:{mediaKey}']").ClickAsync();
         await modal.GetByRole(AriaRole.Button, new() { Name = "Choose", Exact = true }).ClickAsync();
         await Expect(modal).Not.ToBeAttachedAsync();
-        await Expect(picker.Locator("uui-card-media")).ToHaveAttributeAsync("name", "E2E Upload");
+        await Expect(picker.Locator("uui-card-media")).ToHaveAttributeAsync("name", UploadedMediaName());
         await page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.SaveAndPublish']").ClickAsync();
         await Expect(page.Locator("umb-document-publish-modal")).Not.ToBeAttachedAsync();
         // Reading the page and the saved value back confirms that the picker saved the uploaded media, not the previous

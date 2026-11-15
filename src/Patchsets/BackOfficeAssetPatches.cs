@@ -17,8 +17,11 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 /// lists them. <c>Path</c> names a file by its path in the web root, where <c>-????????</c> stands for the build hash in
 /// a bundle's name. <c>From</c> and <c>Before</c> limit an entry to a range of Umbraco releases: it applies from
 /// <c>From</c> up to, but not including, <c>Before</c>. An entry without them applies to every supported release.
-/// <c>Source</c> names a source file the bundle is built from, which the tests use to find the bundle when Umbraco
-/// renames it. An entry's changes apply in this order:
+/// Umbraco 17's later releases share code with 18's: 17.5 with 18.0, 17.6 with 18.1, 17.7 with 18.2, and 17.8 with
+/// 18.3. Release numbers order every 17.x before every 18.x, so code that both share has one entry for each major
+/// version, with the same changes. <c>Contains</c>, when set, is text the file must contain, which picks the right
+/// bundle when several share the name. <c>Source</c> names a source file the bundle is built from, which the
+/// tests use to find the bundle when Umbraco renames it. An entry's changes apply in this order:
 /// </para>
 /// <list type="number">
 /// <item><c>MovesAssetUrls</c> replaces <c>/umbraco/backoffice/</c> at the start of each quoted URL with the site's

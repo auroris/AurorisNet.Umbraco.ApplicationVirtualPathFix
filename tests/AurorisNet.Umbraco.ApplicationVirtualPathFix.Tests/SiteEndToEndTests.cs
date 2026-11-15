@@ -12,8 +12,9 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 /// <summary>
 /// Drives new Umbraco sites with the starter kit through Chromium, one hosting case per test. Browser console errors,
 /// uncaught exceptions, failed requests, HTTP errors and unexpected external requests fail a case, except the expected
-/// 401 when the SSE connection closes after sign-out. Errors in the site's log and warnings from this package also fail
-/// it.
+/// 401s when sign-out ends the session under the SSE connection or a management API request that is still loading, and
+/// two known Umbraco errors that have nothing to do with the virtual path. Errors in the site's log and warnings from this
+/// package also fail it.
 /// </summary>
 public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 {
@@ -226,14 +227,18 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         Assert.Equal(contact.AbsolutePath, response.Headers.Location?.OriginalString);
     }
 
-    /// <summary>Checks that the management API's OpenAPI document and UI load under the virtual path.</summary>
+    /// <summary>
+    /// Checks that the management API's OpenAPI document and UI load under the virtual path: Umbraco 17 serves them with
+    /// Swashbuckle under <c>/umbraco/swagger</c>, and Umbraco 18 under <c>/umbraco/openapi</c>.
+    /// </summary>
     private static async Task CheckOpenApiAsync(TestSite site, CancellationToken ct)
     {
+        var swagger = UmbracoUnderTest.Release.Major < 18;
         using var http = site.CreateHttpClient();
-        using var document = await http.GetAsync(site.Url("/umbraco/openapi/management.json"), ct);
+        using var document = await http.GetAsync(site.Url(swagger ? "/umbraco/swagger/management/swagger.json" : "/umbraco/openapi/management.json"), ct);
         Assert.Equal(HttpStatusCode.OK, document.StatusCode);
         Assert.Contains("\"openapi\"", await document.Content.ReadAsStringAsync(ct), StringComparison.Ordinal);
-        using var ui = await http.GetAsync(site.Url("/umbraco/openapi/"), ct);
+        using var ui = await http.GetAsync(site.Url(swagger ? "/umbraco/swagger/" : "/umbraco/openapi/"), ct);
         Assert.Equal(HttpStatusCode.OK, ui.StatusCode);
     }
 
@@ -416,7 +421,12 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
               container.id = 'test-editors';
               container.style.cssText = 'position:fixed;inset:80px 20px 20px;z-index:10000;background:white;overflow:auto';
               const rte = document.createElement('umb-input-tiptap');
-              rte.configuration = new UmbPropertyEditorConfigCollection([{ alias: 'stylesheets', value: ['/test-rte.css', '/css/test-rte-root.css'] }]);
+              // Up to 17.6 and 18.1 the editor adds its stylesheets only when an extension brings styles, as the heading
+              // extension does. A real editor's configuration always has extensions.
+              rte.configuration = new UmbPropertyEditorConfigCollection([
+                { alias: 'extensions', value: ['Umb.Tiptap.Heading'] },
+                { alias: 'stylesheets', value: ['/test-rte.css', '/css/test-rte-root.css'] },
+              ]);
               rte.value = '<p>Initial text</p>';
               const code = document.createElement('umb-code-editor');
               code.language = 'json'; code.code = '{"invalid": }';
@@ -460,7 +470,9 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             """), "The code editor's icon font must load successfully.");
         await page.Locator("#test-editors").EvaluateAsync("element => element.remove()");
 
-        foreach (var (theme, filename) in new[] { ("umb-dark-theme", "dark.css"), ("umb-high-contrast-theme", "high-contrast.css") })
+        // Umbraco 17.5 names the theme stylesheets dark.theme.css and high-contrast.theme.css.
+        var suffix = UmbracoUnderTest.Release is { Major: 17, Minor: 5 } ? ".theme.css" : ".css";
+        foreach (var (theme, filename) in new[] { ("umb-dark-theme", "dark" + suffix), ("umb-high-contrast-theme", "high-contrast" + suffix) })
         {
             await page.EvaluateAsync("theme => localStorage.setItem('umb-theme-alias', theme)", theme);
             var response = await page.RunAndWaitForResponseAsync(() => page.ReloadAsync(),
@@ -675,8 +687,8 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         {
         }
 
-        // Umbraco names the item after the file: "E2E Upload".
-        var item = page.GetByText("E2E Upload", new() { Exact = true }).First;
+        // Umbraco names the item after the file: "E2E Upload", or "e2e-upload.png" in the releases that keep the file name.
+        var item = page.GetByText(UploadedMediaName()).First;
         await Expect(item).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await item.ClickAsync();
         // Only the file's own URL contains its name; backoffice routes use keys. The image preview and the Info view's
@@ -752,6 +764,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
     /// <summary>Matches the password-reset link in Umbraco's email.</summary>
     [GeneratedRegex("""https?://[^\s"'<>]+flow=reset-password[^\s"'<>]*""")]
     private static partial Regex ResetLink();
+
+    /// <summary>Matches the name Umbraco gives the uploaded test image, with or without the file's own name.</summary>
+    [GeneratedRegex("^(E2E Upload|e2e-upload\\.png)$")]
+    private static partial Regex UploadedMediaName();
 
     /// <summary>Matches the publish dialog's confirm button by name, in any case.</summary>
     [GeneratedRegex("publish", RegexOptions.IgnoreCase)]
@@ -841,11 +857,19 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
                 context.Console += (_, message) =>
                 {
                     if (message.Type == "error"
-                        && !(session.IsSigningOutHub(message.Location)
+                        && !((session.IsSigningOutHub(message.Location) || session.IsLoadingDuringSignOut(message.Location))
                             && message.Text.StartsWith("Failed to load resource: the server responded with a status of 401", StringComparison.Ordinal)))
                         session.Errors.Enqueue($"[{session._step}] Console: {message.Text} ({message.Location})");
                 };
-                context.WebError += (_, error) => session.Errors.Enqueue($"[{session._step}] JavaScript: {error.Error}");
+                context.WebError += (_, error) =>
+                {
+                    if (IsKnownUmbracoError(error.Error))
+                    {
+                        output.WriteLine($"Ignored a known Umbraco {UmbracoUnderTest.Release} error: {error.Error.Split('\n')[0]}");
+                        return;
+                    }
+                    session.Errors.Enqueue($"[{session._step}] JavaScript: {error.Error}");
+                };
                 context.RequestFailed += (_, request) =>
                 {
                     // Navigating away cancels requests that are still running, which is expected.
@@ -855,10 +879,15 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
                 context.Response += (_, response) =>
                 {
                     // Umbraco revokes the session before SignalR sends its SSE close message, so that POST gets a 401, on a
-                    // root site too. Allow only that 401.
+                    // root site too, as does a management API request that is still loading. Allow only those 401s.
                     if (response.Status == 401 && response.Request.Method == "POST" && session.IsSigningOutHub(response.Url))
                     {
                         output.WriteLine("Expected 401 for the server-event hub's SSE close message after sign-out.");
+                        return;
+                    }
+                    if (response.Status == 401 && response.Request.Method == "GET" && session.IsLoadingDuringSignOut(response.Url))
+                    {
+                        output.WriteLine($"Expected 401 for a request that was still loading when the session ended: {response.Url}");
                         return;
                     }
                     if (response.Status >= 400)
@@ -889,6 +918,23 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             }
         }
 
+        /// <summary>
+        /// Returns whether <paramref name="error"/>, an uncaught exception with its stack, is a known bug of the Umbraco
+        /// release under test that has nothing to do with the virtual path. The tags input of Umbraco 17.5 and 18.0 sets
+        /// the width of an element that is not always rendered, which throws during a re-render; 17.6 and 18.1 check for
+        /// the element first. In every supported release, a document workspace controller can read a variant's language
+        /// before the languages have loaded.
+        /// </summary>
+        private static bool IsKnownUmbracoError(string error)
+        {
+            var frame = error.Split('\n').ElementAtOrDefault(1) ?? "";
+            return (UmbracoUnderTest.Release is { Major: 17, Minor: 5 } or { Major: 18, Minor: 0 }
+                    && error.StartsWith("TypeError: Cannot read properties of null (reading 'style')", StringComparison.Ordinal)
+                    && frame.Contains("/packages/tags/tags-input.element-", StringComparison.Ordinal))
+                || (error.StartsWith("TypeError: Cannot read properties of undefined (reading 'isDefault')", StringComparison.Ordinal)
+                    && frame.Contains("/packages/documents/document-allow-edit-invariant-from-non-default-controller-base-", StringComparison.Ordinal));
+        }
+
         /// <summary>Opens another page in the session's context, where the same error recording applies.</summary>
         public Task<IPage> NewPageAsync() => Context.NewPageAsync();
 
@@ -900,6 +946,15 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             => _step == "Sign out" && !_site.Options.WebSockets
                 && Uri.TryCreate(url, UriKind.Absolute, out var address)
                 && address.GetLeftPart(UriPartial.Path) == _site.Url("/umbraco/serverEventHub").ToString();
+
+        /// <summary>
+        /// Returns whether <paramref name="url"/> is a management API address under the virtual path while signing out.
+        /// The backoffice can still be loading, such as the content tree after a cross-site restore, when Umbraco ends
+        /// the session, so such a GET gets a 401, on a root site too. A request outside the virtual path would get a 404
+        /// from the host instead.
+        /// </summary>
+        private bool IsLoadingDuringSignOut(string url)
+            => _step == "Sign out" && url.StartsWith(_site.Url("/umbraco/management/api/").ToString(), StringComparison.Ordinal);
 
         /// <summary>
         /// Runs <paramref name="step"/> under <paramref name="name"/>, which labels the errors recorded meanwhile. When the

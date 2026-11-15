@@ -1,8 +1,8 @@
-# Develop and release the Umbraco 18 fixes
+# Develop and release the fixes
 
 Build the repository to produce `AurorisNet.Umbraco.ApplicationVirtualPathFix` for the
 Umbraco releases listed in `UmbracoReleases` in `Directory.Build.props`, currently
-18.2.0 to 18.3.1. The package depends on the range from `UmbracoMinimumVersion` to
+17.5.0 to 18.3.1. The package depends on the range from `UmbracoMinimumVersion` to
 `UmbracoMaximumVersion`, so NuGet compiles it against the oldest supported release.
 The tests run against the release in `UmbracoVersion`, the newest by default. Pass
 `-p:UmbracoVersion=18.2.1`, for example, to test another, or test every supported
@@ -20,8 +20,8 @@ pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/
 dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-class '*SiteEndToEndTests'
 ```
 
-The release workflow uses the same order: fast asset, URL and middleware checks first,
-then the browser suite. Omit the class filter to run everything in one invocation.
+Run the fast asset, URL and middleware checks first, then the browser suite. Omit the
+class filter to run everything in one invocation.
 Repeat the browser installation after upgrading Playwright. The browser tests build
 five starter-kit sites with their own SQLite databases and start Kestrel on free
 loopback ports, one site at a time. One runs the full affected-feature journey;
@@ -29,16 +29,22 @@ the other four check specific hosting risks. When a step
 fails, the test output includes the page's accessibility tree, and screenshots are
 saved under `bin/Debug/net10.0/e2e-artifacts/<case>/<run>`, next to a `test-output.log`,
 Playwright `trace.zip` and a copy of the site's JSON logs. Traces and logs are saved
-for passing runs too, including failures detected during server shutdown. The release
-workflow uploads these diagnostics even when a test fails. Open a trace with
+for passing runs too, including failures detected during server shutdown. Open a trace with
 `pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 show-trace <path-to-trace.zip>`.
 Set `AVPF_KEEP_TEST_SITE=1` to keep each
 site's folder in the temp directory, with its database and Umbraco logs. Run a
 single test with `-- --filter-method "*Basic_authentication*"`, or select browser
 cases with `AVPF_E2E_CASE`: `full`, `iis`, `proxy`, `proxy-root`, or `basic-auth`.
 Comma-separated lists such as `iis,proxy` are supported; unselected cases skip
-before installing a site. The sites start from
-`SiteTemplate`, the views a new Umbraco 18.3.1 project ships with. Third-party
+before installing a site. On Umbraco 17, run one case per process. Its view helpers
+keep the first site's services in static readonly properties, so a second site in
+the same process would use services that were already disposed. The suite skips
+every case after the first on Umbraco 17 and says why, and
+[`tests/Test-UmbracoReleases.ps1`](#test-every-supported-release) runs each case in its own
+process. The sites start from
+`SiteTemplate`, the views a new Umbraco 18.3.1 project ships with, which also work
+on Umbraco 17. They install the starter kit for the release's major version: 17.0.0
+on Umbraco 17 and 18.0.0 on Umbraco 18. Third-party
 embeds and fonts receive fixed offline responses, and jQuery 3.6.0 is vendored
 under `BrowserFixtures` with its MIT license and original integrity hash. `.gitattributes`
 preserves those bytes across checkouts, including Windows with `core.autocrlf=true`. Unexpected
@@ -122,10 +128,15 @@ cannot forward a member that a later release adds, as 18.3 added
 `IForgotPasswordUriProvider.CanCreateForgotPasswordUriAsync`. The sign-in link
 wrappers therefore use `ForwardingProxy`, which passes every call it does not replace
 to Umbraco's service, and `DecoratorTests` checks that it reaches the service's own
-implementation of such a member. `SupportedReleasesTests` checks that the dependency
-range matches `UmbracoReleases`, that the release under test is listed, and that every
-entry's `From` and `Before` are release numbers covering at least one supported
-release. `HealthCheckTests` covers the health check's results for a site at the root, a
+implementation of such a member. A call to a member that a later release changed
+fails only when it runs, as Umbraco 18 gave the pipeline filter's full constructor
+two more parameters, so the composer uses the constructor and properties that both
+versions have. `SupportedReleasesTests` resolves every type and member the compiled
+package refers to against the release under test, which finds such a change without
+running the code. It also checks that the dependency range matches `UmbracoReleases`,
+that the release under test is listed, and that every entry's `From` and `Before`
+are release numbers covering at least one supported release. `HealthCheckTests`
+covers the health check's results for a site at the root, a
 working site under a virtual path, and a site with an unsupported Umbraco version, a
 missing path base, an unapplied change and requests outside the virtual path. The
 `full` browser case runs the check through the management API.
@@ -153,9 +164,9 @@ The fixture adds two images to the starter kit's home template to exercise the
 media picker's published value through `.Url()` and signed `GetCropUrl()` output.
 It supplies the crop helper's services explicitly because Umbraco's convenience
 overload caches the first site's services in static readonly properties, while
-this suite boots several independent sites in one process.
+this suite boots several independent sites in one process on Umbraco 18.
 
-Run the release-script checks with Pester 5.7.1 (also run by the release workflow):
+Run the release-script checks with Pester 5.7.1:
 
 ```powershell
 Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
@@ -186,10 +197,14 @@ pwsh tests/Test-UmbracoReleases.ps1 -Browser
 
 The builds run one at a time, because Umbraco's build targets write
 `appsettings-schema.json` into the project folder and parallel restores can collide
-in the NuGet cache. Each release's tests run in their own process with their own
+in the NuGet cache. Each release's fast tests run in one process, and each browser
+case runs in a process of its own, as Umbraco 17 needs. Every process has its own
 temporary folder. The script prints one line per release, lists the failed tests,
 and exits with 1 when any release fails. Pass `-Releases 18.2.1,18.3.0` to test some
-releases, `-Throttle 2` to limit how many run their tests at once, and
+releases, `-Throttle 2` to limit how many test processes run at once (by default,
+every release's fast tests run at once, and browser cases a quarter as many as the
+machine has processors, because their timing-sensitive steps time out on a busy
+machine), and
 `-ArtifactsPath` to put the builds elsewhere. `-Browser` needs Chromium installed, as
 [Build and test](#build-and-test) shows, and `AVPF_E2E_CASE` selects its cases.
 
@@ -202,9 +217,13 @@ releases, `-Throttle 2` to limit how many run their tests at once, and
    show which entries no longer match, and `PatchOriginTests` says whether Umbraco
    changed the code or only its minified output.
 3. For each entry that no longer matches, add an entry for the new release with
-   `From` set to it, and give the old entry a `Before` with the same release.
-4. Run `pwsh tests/Test-UmbracoReleases.ps1` and then with `-Browser`, so every
-   supported release passes both tiers.
+   `From` set to it, and give the old entry a `Before` with the same release. When
+   the old entry already had a `Before`, as an Umbraco 17 entry does, the new entry
+   keeps it.
+4. Run the fast tests for the new release again, then the browser tests with
+   `pwsh tests/Test-UmbracoReleases.ps1 -Releases <release> -Browser`. The earlier
+   releases need no new run: the new entries start at the new release, and each
+   `Before` leaves the earlier releases' entries as they were.
 
 ## Build a package
 
@@ -224,21 +243,23 @@ deterministic.
 
 ## Publish a release
 
-Push the intended changes to `main`, then open **Actions → Release → Run workflow**
-on GitHub and select `main`. Pushes alone never start a release. The workflow:
+The tests run locally, not in the workflow, and each Umbraco release is tested once:
+when it is added, and again only after a change that might affect it. A new or
+changed entry in `src/Patchsets` affects the releases from its `From` up to its
+`Before`. A change to the package's other code, or a new `UmbracoMinimumVersion`,
+can affect them all. Before releasing, run both tiers for those releases with
+`-Releases`, as [Test every supported release](#test-every-supported-release) shows,
+and run the release-script checks with Pester if you changed `.github/scripts`. Then
+push the commit to `main`, open **Actions → Release → Run workflow** on GitHub and
+select `main`. Pushes alone never start a release. The workflow:
 
 1. Checks that it runs from `main`, then chooses the next
    `<UmbracoMaximumVersion>.<count>`, such as `18.3.1.2`, from the existing release
    tags.
-2. Builds the package, then runs `tests/Test-UmbracoReleases.ps1` for the fast tests
-   and, after installing Chromium, for the browser tests, so every supported Umbraco
-   release passes both before packing. The browser cases run two releases at a time.
-3. Reserves a tag such as `v18.3.1.2` at the tested commit.
+2. Builds and packs the package.
+3. Reserves a tag such as `v18.3.1.2` at the commit.
 4. Publishes the package to NuGet and creates a GitHub release with the package
    attached.
-
-The workflow uploads each release's test logs and browser and server diagnostics, even
-when a test fails.
 
 NuGet trusted publishing is configured for the `AurorisNet` account, GitHub
 repository `auroris/UmbracoApplicationVirtualPathFix`, workflow filename

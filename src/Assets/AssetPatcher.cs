@@ -36,16 +36,31 @@ internal static partial class AssetPatcher
 
     /// <summary>
     /// Finds the files in <paramref name="files"/> that <paramref name="patch"/> applies to, with their paths. A path
-    /// containing <see cref="HashPattern"/> matches any build hash. A correct patch finds exactly one file.
+    /// containing <see cref="HashPattern"/> matches any build hash, and <see cref="AssetPatch.Contains"/> keeps only the
+    /// files that contain its text. A correct patch finds exactly one file.
     /// </summary>
     internal static (string Path, IFileInfo File)[] Locate(IFileProvider files, AssetPatch patch)
     {
+        (string Path, IFileInfo File)[] found;
         if (!patch.Path.Contains(HashPattern, StringComparison.Ordinal))
-            return files.GetFileInfo(patch.Path) is { Exists: true, IsDirectory: false } file ? [(patch.Path, file)] : [];
-        var directory = patch.Path[..patch.Path.LastIndexOf('/')];
-        return files.GetDirectoryContents(directory)
-            .Where(file => !file.IsDirectory && string.Equals(NormalizePath(directory + "/" + file.Name), patch.Path, StringComparison.OrdinalIgnoreCase))
-            .Select(file => (directory + "/" + file.Name, file)).ToArray();
+        {
+            found = files.GetFileInfo(patch.Path) is { Exists: true, IsDirectory: false } file ? [(patch.Path, file)] : [];
+        }
+        else
+        {
+            var directory = patch.Path[..patch.Path.LastIndexOf('/')];
+            found = files.GetDirectoryContents(directory)
+                .Where(file => !file.IsDirectory && string.Equals(NormalizePath(directory + "/" + file.Name), patch.Path, StringComparison.OrdinalIgnoreCase))
+                .Select(file => (directory + "/" + file.Name, file)).ToArray();
+        }
+        return patch.Contains is { } text ? Array.FindAll(found, file => Read(file.File).Contains(text, StringComparison.Ordinal)) : found;
+    }
+
+    /// <summary>Reads <paramref name="file"/> as UTF-8 text.</summary>
+    private static string Read(IFileInfo file)
+    {
+        using var reader = new StreamReader(file.CreateReadStream(), System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 
     /// <summary>

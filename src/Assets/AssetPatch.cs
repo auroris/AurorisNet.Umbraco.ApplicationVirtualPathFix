@@ -25,6 +25,12 @@ internal sealed class AssetPatch
     internal string? Before { get; init; }
 
     /// <summary>
+    /// Text the file must contain. It picks the right bundle when several share the name in <see cref="Path"/>, as
+    /// Umbraco 17.5, 17.6, 18.0 and 18.1 each have two <c>constants-????????.js</c> chunks.
+    /// </summary>
+    internal string? Contains { get; init; }
+
+    /// <summary>
     /// A source file the bundle is built from. The tests check it against the bundle's source map and use it to find
     /// the bundle again when Umbraco renames it.
     /// </summary>

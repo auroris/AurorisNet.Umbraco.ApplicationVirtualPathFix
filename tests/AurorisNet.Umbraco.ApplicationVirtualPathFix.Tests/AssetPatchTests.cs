@@ -75,6 +75,31 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
         }
     }
 
+    /// <summary>
+    /// Checks that <see cref="AssetPatch.Contains"/> keeps, among the files that match an entry's name, only those whose
+    /// text includes it, as it picks one of the two <c>constants-????????.js</c> chunks of Umbraco 17.5, 17.6, 18.0 and
+    /// 18.1.
+    /// </summary>
+    [Fact]
+    public void Contains_picks_the_bundle_with_its_text()
+    {
+        var root = Directory.CreateTempSubdirectory("asset-patch-contains-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "block"));
+            File.WriteAllText(Path.Combine(root, "block", "constants-AAAAAAAA.js"), "export const a = 1;");
+            File.WriteAllText(Path.Combine(root, "block", "constants-BBBBBBBB.js"), "const c = \"/umbraco/backoffice/css/umbraco-blockgridlayout.css\";");
+            using var files = new PhysicalFileProvider(root);
+            Assert.Equal(2, AssetPatcher.Locate(files, new AssetPatch { Path = "/block/constants-????????.js" }).Length);
+            var patch = new AssetPatch { Path = "/block/constants-????????.js", Contains = "umbraco-blockgridlayout.css" };
+            Assert.Equal("/block/constants-BBBBBBBB.js", Assert.Single(AssetPatcher.Locate(files, patch)).Path);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     /// <summary>Checks that the package's own <c>auth.js</c> parses as a JavaScript module.</summary>
     [Fact]
     public async Task Package_scripts_parse()

@@ -43,7 +43,7 @@ internal sealed class TestHostingEnvironment(string prefix) : IHostingEnvironmen
     public string LocalTempPath => throw new NotSupportedException();
     public bool IsDebugMode => throw new NotSupportedException();
     public bool IsHosted => throw new NotSupportedException();
-    public Uri? ApplicationMainUrl => throw new NotSupportedException();
+    public Uri ApplicationMainUrl => throw new NotSupportedException();
     /// <summary>Throws <see cref="NotSupportedException"/>, because the tests map no physical paths.</summary>
     public string MapPathWebRoot(string path) => throw new NotSupportedException();
     /// <summary>Throws <see cref="NotSupportedException"/>, because the tests map no physical paths.</summary>

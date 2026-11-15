@@ -8,7 +8,7 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 
 /// <summary>Adds the virtual path to the invitation and password-reset links that Umbraco emails to users.</summary>
 /// <remarks>
-/// Umbraco 18.2 and 18.3 build these links by replacing the application URL's path with <c>/umbraco/login</c>, which
+/// Umbraco 17 and 18 build these links by replacing the application URL's path with <c>/umbraco/login</c>, which
 /// drops the virtual path. Each wrapper replaces only the method that creates a link and passes every other call to
 /// Umbraco's provider through <see cref="ForwardingProxy{TService}"/>.
 /// </remarks>

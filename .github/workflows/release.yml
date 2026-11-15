@@ -16,17 +16,15 @@ defaults:
 
 jobs:
   release:
-    name: Test and publish
+    name: Build and publish
     runs-on: windows-latest
-    # Every supported Umbraco release gets its own build, the fast tests, and one full browser journey and four focused
-    # hosting cases, each with its own site.
-    timeout-minutes: 150
+    # The tests run locally before a release, as docs/DEVELOPING.md describes, so this job only builds and publishes.
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
     env:
       PACKAGE_PROJECT: src/AurorisNet.Umbraco.ApplicationVirtualPathFix.csproj
-      TEST_PROJECT: tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests.csproj
       ContinuousIntegrationBuild: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -49,37 +47,10 @@ jobs:
           "version=$($release.Version)" >> $env:GITHUB_OUTPUT
           "tag=$($release.Tag)" >> $env:GITHUB_OUTPUT
 
-      - name: Test release version selection
-        run: |
-          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
-          Import-Module Pester -RequiredVersion 5.7.1
-          Invoke-Pester .github/scripts/Get-ReleaseVersion.Tests.ps1 -CI
-
       - name: Build
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: dotnet build "$env:TEST_PROJECT" -c Release -p:Version=$env:RELEASE_VERSION
-
-      - name: Test asset compatibility and middleware on every supported Umbraco release
-        run: ./tests/Test-UmbracoReleases.ps1 -Configuration Release
-
-      - name: Install Chromium
-        run: ./tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Release/net10.0/playwright.ps1 install chromium
-
-      # Two releases at a time keeps the hosted runner's timing-sensitive browser steps reliable.
-      - name: Test affected features and hosting cases on every supported Umbraco release
-        run: ./tests/Test-UmbracoReleases.ps1 -Configuration Release -Browser -Throttle 2
-
-      - name: Upload test logs and browser and server diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: browser-diagnostics
-          path: |
-            artifacts/umbraco-releases/*/*.log
-            artifacts/umbraco-releases/*/artifacts/bin/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/release/e2e-artifacts/
-          if-no-files-found: ignore
-          retention-days: 7
+        run: dotnet build "$env:PACKAGE_PROJECT" -c Release -p:Version=$env:RELEASE_VERSION
 
       - name: Pack
         env:

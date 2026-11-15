@@ -2,10 +2,13 @@
   <PropertyGroup>
     <!-- The Umbraco releases the package supports, oldest first. The package depends on the range from the first to the
          last, and tests/Test-UmbracoReleases.ps1 runs the tests against each one. -->
-    <UmbracoReleases>18.2.0;18.2.1;18.2.2;18.3.0;18.3.1</UmbracoReleases>
-    <UmbracoMinimumVersion>18.2.0</UmbracoMinimumVersion>
+    <UmbracoReleases>17.5.0;17.5.1;17.5.2;17.5.3;17.6.0;17.6.1;17.6.2;17.7.0;17.7.1;17.7.2;17.8.0;17.8.1;18.0.0;18.0.1;18.0.2;18.1.0;18.1.1;18.2.0;18.2.1;18.2.2;18.3.0;18.3.1</UmbracoReleases>
+    <UmbracoMinimumVersion>17.5.0</UmbracoMinimumVersion>
     <UmbracoMaximumVersion>18.3.1</UmbracoMaximumVersion>
     <!-- The release the tests run against. Pass -p:UmbracoVersion=18.2.1, for example, to test another one. -->
     <UmbracoVersion>18.3.1</UmbracoVersion>
+    <!-- The starter kit the browser tests install, which follows the major version of the release under test. -->
+    <UmbracoStarterKitVersion Condition="$(UmbracoVersion.StartsWith('17.'))">17.0.0</UmbracoStarterKitVersion>
+    <UmbracoStarterKitVersion Condition="'$(UmbracoStarterKitVersion)' == ''">18.0.0</UmbracoStarterKitVersion>
   </PropertyGroup>
 </Project>
