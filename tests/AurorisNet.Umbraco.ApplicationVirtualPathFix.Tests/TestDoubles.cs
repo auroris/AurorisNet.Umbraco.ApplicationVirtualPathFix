@@ -1,9 +1,29 @@
+using System.Collections.Concurrent;
 using Umbraco.Cms.Core.Configuration;
 using Umbraco.Cms.Core.Semver;
 using Umbraco.Cms.Web.Common.Hosting;
 using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
+
+/// <summary>A logger and provider that records warning messages.</summary>
+internal sealed class RecordedWarnings : ILoggerProvider, ILogger
+{
+    public ConcurrentQueue<string> Messages { get; } = new();
+    /// <summary>Returns this logger for every category.</summary>
+    public ILogger CreateLogger(string categoryName) => this;
+    /// <summary>Starts no scope and returns <see langword="null"/>.</summary>
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+    /// <summary>Returns whether <paramref name="level"/> is <see cref="LogLevel.Warning"/>.</summary>
+    public bool IsEnabled(LogLevel level) => level == LogLevel.Warning;
+    /// <summary>Keeps the formatted message of each warning.</summary>
+    public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        if (level == LogLevel.Warning) Messages.Enqueue(formatter(state, exception));
+    }
+    /// <summary>Releases nothing, because the provider holds no resources.</summary>
+    public void Dispose() { }
+}
 
 /// <summary>Backoffice paths for a site under <paramref name="prefix"/>, with the cache-bust hash <c>hash</c>.</summary>
 internal sealed class TestBackOfficePaths(string prefix) : IBackOfficePathGenerator

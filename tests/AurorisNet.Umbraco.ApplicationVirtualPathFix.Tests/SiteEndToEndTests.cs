@@ -49,7 +49,6 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             await browser.StepAsync("OpenAPI documents", () => CheckOpenApiAsync(site, ct));
             await browser.StepAsync("Front end: home and nested page", () => CheckFrontEndAsync(browser.Page, site));
             await browser.StepAsync("Forgotten password email", () => FollowPasswordResetEmailAsync(browser, site, ct));
-            // Keep these steps after the password reset, which reads the first email in the mail folder.
             await browser.StepAsync("Built-in error page", () => CheckErrorPageAsync(site, ct));
             await browser.StepAsync("Contact form", () => SubmitContactFormAsync(site, ct));
             await browser.StepAsync("Backoffice sign-in", () => SignInAsync(browser.Page, site));
@@ -303,36 +302,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await emailInput.FillAsync(TestSite.Email);
         await page.GetByRole(AriaRole.Button, new() { Name = "Submit", Exact = true }).ClickAsync();
 
-        var email = await WaitForFileAsync(site.MailDirectory, "*.eml", ct);
-        MimeMessage? message = null;
-        await WaitUntilAsync(async () =>
-        {
-            try
-            {
-                message = await MimeMessage.LoadAsync(email, ct);
-                return true;
-            }
-            catch (IOException)
-            {
-                // Umbraco may still be writing the file.
-                return false;
-            }
-        }, () => $"The email {email} stayed unreadable.", ct);
-
-        var body = message!.HtmlBody ?? message.TextBody ?? "";
-        var match = ResetLink().Match(body);
-        Assert.True(match.Success, $"No reset link in the email: {body}");
-        var link = new Uri(WebUtility.HtmlDecode(match.Value));
-        _log.WriteLine($"Reset link: {link.GetLeftPart(UriPartial.Path)}");
-        Assert.Equal(site.Address.Authority, link.Authority);
-        Assert.Equal(site.Url("/umbraco/login").AbsolutePath, link.AbsolutePath);
-
-        var resetPage = await browser.NewPageAsync();
-        response = await resetPage.GotoAsync(link.ToString());
-        Assert.True(response?.Ok, $"The reset link returned HTTP {response?.Status}");
-        // The page validates the reset code through the API before it offers the form.
-        await Expect(resetPage.GetByRole(AriaRole.Textbox, new() { Name = "New password", Exact = true })).ToBeVisibleAsync();
-        await resetPage.CloseAsync();
+        await FollowEmailLinkAsync(browser, site, ResetLink(), ct);
     }
 
     /// <summary>
@@ -495,9 +465,8 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
     /// Invites a user through the management API and checks that the emailed link points at the prefixed login page on the
     /// site's host. Then opens the link and waits for the new-password form.
     /// </summary>
-    private static async Task FollowInvitationEmailAsync(BrowserSession browser, TestSite site, CancellationToken ct)
+    private async Task FollowInvitationEmailAsync(BrowserSession browser, TestSite site, CancellationToken ct)
     {
-        var existing = Directory.GetFiles(site.MailDirectory, "*.eml").ToHashSet();
         var status = await browser.Page.EvaluateAsync<int>("""
             async groupId => {
               const { UserService } = await import('@umbraco-cms/backoffice/external/backend-api');
@@ -508,36 +477,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             }
             """, global::Umbraco.Cms.Core.Constants.Security.EditorGroupKey.ToString()).WaitAsync(Patience, ct);
         Assert.Equal(201, status);
-        string? body = null;
-        await WaitUntilAsync(async () =>
-        {
-            foreach (var file in Directory.GetFiles(site.MailDirectory, "*.eml").Where(file => !existing.Contains(file)))
-            {
-                try
-                {
-                    using var message = await MimeMessage.LoadAsync(file, ct);
-                    body = message.HtmlBody ?? message.TextBody;
-                }
-                catch (IOException)
-                {
-                    // Umbraco may still be writing the file.
-                }
-            }
-            return body is not null;
-        }, () => "No invitation email arrived.", ct);
-        Assert.NotNull(body);
-        var match = Regex.Match(body, "https?://[^\\s\"'<>]+flow=invite[^\\s\"'<>]*");
-        Assert.True(match.Success, "The invitation should contain a login link.");
-        var link = new Uri(WebUtility.HtmlDecode(match.Value));
-        Assert.Equal(site.Address.Authority, link.Authority);
-        Assert.Equal(site.Url("/umbraco/login").AbsolutePath, link.AbsolutePath);
-        var page = await browser.NewPageAsync();
-        try
-        {
-            await page.GotoAsync(link.ToString());
-            await Expect(page.GetByRole(AriaRole.Textbox, new() { Name = "New password", Exact = true })).ToBeVisibleAsync();
-        }
-        finally { await page.CloseAsync(); }
+        await FollowEmailLinkAsync(browser, site, InvitationLink(), ct);
     }
 
     /// <summary>
@@ -618,22 +558,15 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
                 await AssertServerSentEventsAsync(preview, "PreviewHub");
             }
             // The preview window loads the page into a frame of its own.
-            IFrame? frame = null;
-            await WaitUntilAsync(() =>
-            {
-                frame = preview.Frames.FirstOrDefault(candidate => candidate != preview.MainFrame
-                    && Uri.TryCreate(candidate.Url, UriKind.Absolute, out var address) && address.Scheme.StartsWith("http", StringComparison.Ordinal));
-                return Task.FromResult(frame is not null);
-            }, () => "The preview window did not load the page.", ct);
-
-            Assert.NotNull(frame);
-            _log.WriteLine($"Preview frame: {new Uri(frame.Url).AbsolutePath}");
-            Assert.StartsWith(site.Url("/").AbsolutePath, new Uri(frame.Url).AbsolutePath, StringComparison.OrdinalIgnoreCase);
-            await Expect(frame.Locator("body")).ToContainTextAsync(draftTitle);
+            var frame = preview.FrameLocator("iframe").Locator("body");
+            await Expect(frame).ToContainTextAsync(draftTitle);
+            var frameUrl = new Uri(await frame.EvaluateAsync<string>("body => body.ownerDocument.URL"));
+            _log.WriteLine($"Preview frame: {frameUrl.AbsolutePath}");
+            Assert.StartsWith(site.Url("/").AbsolutePath, frameUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase);
             // Saving another draft refreshes the open frame through SignalR, also in the IIS case without WebSockets.
             await page.GetByRole(AriaRole.Textbox, new() { Name = "Page Title" }).First.FillAsync(updatedTitle);
             await page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.Save']").ClickAsync();
-            await Expect(preview.FrameLocator("iframe").Locator("body")).ToContainTextAsync(updatedTitle);
+            await Expect(frame).ToContainTextAsync(updatedTitle);
             var published = await http.GetStringAsync(url, ct);
             Assert.Contains(pageName, published);
             Assert.DoesNotContain(draftTitle, published);
@@ -743,15 +676,43 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Returns the first file in <paramref name="directory"/> that matches <paramref name="pattern"/> once one appears.
-    /// Throws <see cref="TimeoutException"/> when none appears within <see cref="Patience"/>.
+    /// Waits for an email containing the expected link, checks its public host and prefixed login path, and opens it.
+    /// Both reset and invitation links must validate through the API before the new-password form appears.
     /// </summary>
-    private static async Task<string> WaitForFileAsync(string directory, string pattern, CancellationToken ct)
+    private async Task FollowEmailLinkAsync(BrowserSession browser, TestSite site, Regex pattern, CancellationToken ct)
     {
-        string? found = null;
-        await WaitUntilAsync(() => Task.FromResult((found = Directory.EnumerateFiles(directory, pattern).FirstOrDefault()) is not null),
-            () => $"No {pattern} file appeared in {directory}.", ct);
-        return found!;
+        Uri? link = null;
+        await WaitUntilAsync(async () =>
+        {
+            foreach (var file in Directory.EnumerateFiles(site.MailDirectory, "*.eml"))
+            {
+                try
+                {
+                    using var message = await MimeMessage.LoadAsync(file, ct);
+                    var match = pattern.Match(message.HtmlBody ?? message.TextBody ?? "");
+                    if (!match.Success) continue;
+                    link = new Uri(WebUtility.HtmlDecode(match.Value));
+                    return true;
+                }
+                catch (IOException)
+                {
+                    // Umbraco may still be writing the file.
+                }
+            }
+            return false;
+        }, () => $"No email containing {pattern} arrived.", ct);
+        Assert.NotNull(link);
+        _log.WriteLine($"Email link: {link.GetLeftPart(UriPartial.Path)}");
+        Assert.Equal(site.Address.Authority, link.Authority);
+        Assert.Equal(site.Url("/umbraco/login").AbsolutePath, link.AbsolutePath);
+        var page = await browser.NewPageAsync();
+        try
+        {
+            var response = await page.GotoAsync(link.ToString());
+            Assert.True(response?.Ok, $"The email link returned HTTP {response?.Status}");
+            await Expect(page.GetByRole(AriaRole.Textbox, new() { Name = "New password", Exact = true })).ToBeVisibleAsync();
+        }
+        finally { await page.CloseAsync(); }
     }
 
     /// <summary>
@@ -796,6 +757,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
     /// <summary>Matches the password-reset link in Umbraco's email.</summary>
     [GeneratedRegex("""https?://[^\s"'<>]+flow=reset-password[^\s"'<>]*""")]
     private static partial Regex ResetLink();
+
+    /// <summary>Matches the invitation link in Umbraco's email.</summary>
+    [GeneratedRegex("""https?://[^\s"'<>]+flow=invite[^\s"'<>]*""")]
+    private static partial Regex InvitationLink();
 
     /// <summary>Matches the name Umbraco gives the uploaded test image, with or without the file's own name.</summary>
     [GeneratedRegex("^(E2E Upload|e2e-upload\\.png)$")]

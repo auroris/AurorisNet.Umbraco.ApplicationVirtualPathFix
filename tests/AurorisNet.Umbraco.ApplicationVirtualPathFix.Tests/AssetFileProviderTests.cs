@@ -73,7 +73,7 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
     public async Task Files_are_read_and_missing_patterns_reported_only_during_preparation()
     {
         var login = new ChangedLogin();
-        var logger = new RecordedWarnings();
+        using var logger = new RecordedWarnings();
         var provider = new BackOfficeAssetFileProvider(new LoginOverride(assets.Files, login), new TestBackOfficePaths(Prefix), Prefix,
             UmbracoUnderTest.Release, logger);
         // One warning for each edit to login.js, as no edit finds its code in the changed file.
@@ -185,20 +185,5 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         public string? PhysicalPath => null;
         /// <summary>Counts the read and opens a read-only stream over the file's bytes.</summary>
         public Stream CreateReadStream() { Reads++; return new MemoryStream(_bytes, writable: false); }
-    }
-
-    /// <summary>A logger that keeps the text of each warning.</summary>
-    private sealed class RecordedWarnings : ILogger
-    {
-        public List<string> Messages { get; } = [];
-        /// <summary>Starts no scope and returns <see langword="null"/>.</summary>
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        /// <summary>Returns whether <paramref name="level"/> is <see cref="LogLevel.Warning"/>.</summary>
-        public bool IsEnabled(LogLevel level) => level == LogLevel.Warning;
-        /// <summary>Keeps the formatted message of each warning.</summary>
-        public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            if (level == LogLevel.Warning) Messages.Add(formatter(state, exception));
-        }
     }
 }

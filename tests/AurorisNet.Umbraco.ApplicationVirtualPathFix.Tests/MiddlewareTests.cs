@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Net;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -11,22 +10,9 @@ using Umbraco.Cms.Web.Common.Hosting;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
-/// <summary>Checks the package's middleware, mostly in small Kestrel hosts, and the startup version warning.</summary>
+/// <summary>Checks request paths in memory, response compression over HTTP, and the startup version warning.</summary>
 public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixture<AssetPatchTests.Assets>
 {
-    /// <summary>Where a test adds response compression relative to the virtual-path middleware.</summary>
-    public enum CompressionOrder
-    {
-        /// <summary>The pipeline has no response compression.</summary>
-        None,
-
-        /// <summary>Response compression runs before the virtual-path middleware.</summary>
-        Before,
-
-        /// <summary>Response compression runs after the virtual-path middleware.</summary>
-        After,
-    }
-
     /// <summary>
     /// Checks that only an HTML request under <c>/umbraco</c> with a differently cased prefix is redirected to the
     /// configured prefix, keeping its query string; scripts and site pages pass through.
@@ -37,36 +23,49 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
     [InlineData("/PORTAL/content", "text/html", false)]
     public async Task Only_backoffice_navigations_canonicalize_prefix_casing(string path, string accept, bool redirect)
     {
-        await using var app = CreateApp();
+        using var services = new ServiceCollection()
+            .AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths("/portal")).BuildServiceProvider();
+        var app = new ApplicationBuilder(services);
         app.UsePathBase("/portal");
         app.UseUmbracoPathsUnderPathBase();
-        app.Run(context => context.Response.WriteAsync("Reached the handler"));
-        await app.StartAsync(TestContext.Current.CancellationToken);
-        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
-        http.DefaultRequestHeaders.Accept.ParseAdd(accept);
-        using var response = await http.GetAsync(Address(app) + path, TestContext.Current.CancellationToken);
-        Assert.Equal(redirect ? HttpStatusCode.Found : HttpStatusCode.OK, response.StatusCode);
-        if (redirect) Assert.Equal("/portal/umbraco?code=a%2Fb&state=x", response.Headers.Location?.OriginalString);
-        await app.StopAsync(CancellationToken.None);
+        var reachedHandler = false;
+        app.Run(_ => { reachedHandler = true; return Task.CompletedTask; });
+        var url = new Uri("http://site.test" + path);
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = url.AbsolutePath;
+        context.Request.QueryString = new QueryString(url.Query);
+        context.Request.Headers.Accept = accept;
+        await app.Build()(context);
+        Assert.Equal(!redirect, reachedHandler);
+        Assert.Equal(redirect ? StatusCodes.Status302Found : StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal(redirect ? "/portal/umbraco?code=a%2Fb&state=x" : "", context.Response.Headers.Location.ToString());
     }
 
     /// <summary>
-    /// Checks that patched assets and the rendered backoffice page arrive intact with or without response compression,
-    /// on either side of the virtual-path middleware.
+    /// Checks that patched assets and the rendered backoffice page arrive intact through normal response compression.
+    /// File-provider and body tests cover their uncompressed contents separately.
     /// </summary>
-    [Theory]
-    [InlineData(CompressionOrder.None)]
-    [InlineData(CompressionOrder.Before)]
-    [InlineData(CompressionOrder.After)]
-    public async Task Patched_assets_and_rendered_html_use_normal_response_compression(CompressionOrder compression)
+    [Fact]
+    public async Task Patched_assets_and_rendered_html_use_normal_response_compression()
     {
-        await using var app = CreateApp();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+        builder.Services.AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths("/portal"));
+        builder.Services.AddControllersWithViews();
+        builder.Services.AddTransient<ITagHelperComponent, BackOfficeBodyTagHelperComponent>();
+        builder.Services.Configure<GlobalSettings>(options => options.UseHttps = false);
+#pragma warning disable CS0618
+        builder.Services.Configure<BackOfficeTokenCookieSettings>(options => { options.SameSite = "Strict"; options.SiteName = ""; });
+#pragma warning restore CS0618
+        builder.Services.AddResponseCompression();
+        await using var app = builder.Build();
         app.Environment.WebRootFileProvider = new BackOfficeAssetFileProvider(assets.Files, new TestBackOfficePaths("/portal"), "/portal",
             UmbracoUnderTest.Release, NullLogger.Instance);
         app.UsePathBase("/portal");
-        if (compression == CompressionOrder.Before) app.UseResponseCompression();
+        app.UseResponseCompression();
         app.UseUmbracoPathsUnderPathBase();
-        if (compression == CompressionOrder.After) app.UseResponseCompression();
         app.UseUmbracoBackOfficeRewrites();
         app.UseStaticFiles();
         app.Run(async context =>
@@ -76,7 +75,8 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
             await context.Response.WriteAsync(html);
         });
         await app.StartAsync(TestContext.Current.CancellationToken);
-        using var http = new HttpClient();
+        using var http = new HttpClient { BaseAddress = new Uri(app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()!.Addresses.Single()) };
         http.DefaultRequestHeaders.Accept.ParseAdd("text/html");
         http.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip");
         foreach (var (path, expected) in new[]
@@ -87,15 +87,30 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
             ("/portal/umbraco/backoffice/hash/css/umb-css.css", "url(../assets/"),
         })
         {
-            using var response = await http.GetAsync(Address(app) + path, TestContext.Current.CancellationToken);
+            using var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var compressed = compression != CompressionOrder.None;
-            Assert.Equal(compressed, response.Content.Headers.ContentEncoding.Contains("gzip"));
+            Assert.Contains("gzip", response.Content.Headers.ContentEncoding);
             await using var stream = await response.Content.ReadAsStreamAsync(TestContext.Current.CancellationToken);
-            using var reader = new StreamReader(compressed ? new GZipStream(stream, CompressionMode.Decompress) : stream);
+            using var reader = new StreamReader(new GZipStream(stream, CompressionMode.Decompress));
             Assert.Contains(expected, await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
         }
         await app.StopAsync(CancellationToken.None);
+    }
+
+    /// <summary>The release under test and unlisted versions above, below and inside the dependency range.</summary>
+    public static TheoryData<Version, bool> StartupVersions
+    {
+        get
+        {
+            var supported = UmbracoUnderTest.SupportedReleases;
+            return new()
+            {
+                { UmbracoUnderTest.Release, false },
+                { new Version(supported[^1].Major, supported[^1].Minor, supported[^1].Build + 1), true },
+                { new Version(supported[0].Major - 1, 0, 0), true },
+                { new Version(17, 99, 0), true },
+            };
+        }
     }
 
     /// <summary>
@@ -103,29 +118,19 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
     /// unlisted Umbraco release, including one inside the dependency range, and none for the release under test.
     /// </summary>
     [Theory]
-    [InlineData("supported")]
-    [InlineData("newer")]
-    [InlineData("older")]
-    [InlineData("unlisted")]
-    public void Startup_warns_only_for_an_unsupported_Umbraco_release(string release)
+    [MemberData(nameof(StartupVersions))]
+    public void Startup_warns_only_for_an_unsupported_Umbraco_release(Version release, bool warns)
     {
-        var supported = UmbracoUnderTest.SupportedReleases;
-        var actual = release switch
-        {
-            "newer" => new Version(supported[^1].Major, supported[^1].Minor, supported[^1].Build + 1),
-            "older" => new Version(supported[0].Major - 1, 0, 0),
-            "unlisted" => new Version(17, 99, 0),
-            _ => UmbracoUnderTest.Release,
-        };
-        using var logger = new RecordedLogs();
+        using var logger = new RecordedWarnings();
         using var services = new ServiceCollection().AddLogging(logging => logging.AddProvider(logger))
-            .AddSingleton<IUmbracoVersion>(new TestUmbracoVersion(actual)).BuildServiceProvider();
+            .AddSingleton<IUmbracoVersion>(new TestUmbracoVersion(release)).BuildServiceProvider();
         ApplicationVirtualPathFixComposer.WarnOnUnsupportedUmbracoVersion(services);
-        Assert.Equal(release == "supported" ? 0 : 1, logger.Warnings.Count);
-        if (release != "supported")
+        Assert.Equal(warns ? 1 : 0, logger.Messages.Count);
+        if (warns)
         {
-            Assert.Contains(ApplicationVirtualPathFixComposer.SupportedUmbracoVersions!, logger.Warnings.Single());
-            Assert.Contains(actual.ToString(), logger.Warnings.Single());
+            var message = Assert.Single(logger.Messages);
+            Assert.Contains(ApplicationVirtualPathFixComposer.SupportedUmbracoVersions, message);
+            Assert.Contains(release.ToString(), message);
         }
     }
 
@@ -138,7 +143,9 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
     [InlineData(true)]
     public async Task Temporary_path_change_is_undone_even_when_downstream_throws(bool throws)
     {
-        await using var app = CreateApp();
+        using var services = new ServiceCollection()
+            .AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths("/portal")).BuildServiceProvider();
+        var app = new ApplicationBuilder(services);
         var context = new DefaultHttpContext();
         const string originalPath = "/umbraco/basic-auth";
         context.Request.PathBase = "/portal";
@@ -152,7 +159,7 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
             if (throws) throw failure;
             return Task.CompletedTask;
         });
-        var pipeline = ((IApplicationBuilder)app).Build();
+        var pipeline = app.Build();
         if (throws)
             Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => pipeline(context)));
         else
@@ -160,47 +167,4 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         Assert.Equal(originalPath, context.Request.Path.Value);
         Assert.Equal("/portal", context.Request.PathBase.Value);
     }
-
-    /// <summary>A logger provider whose logger keeps the text of each warning.</summary>
-    private sealed class RecordedLogs : ILoggerProvider, ILogger
-    {
-        public ConcurrentQueue<string> Warnings { get; } = new();
-        /// <summary>Returns this logger for every category.</summary>
-        public ILogger CreateLogger(string categoryName) => this;
-        /// <summary>Starts no scope and returns <see langword="null"/>.</summary>
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        /// <summary>Returns whether <paramref name="level"/> is <see cref="LogLevel.Warning"/>.</summary>
-        public bool IsEnabled(LogLevel level) => level == LogLevel.Warning;
-        /// <summary>Keeps the formatted message of each warning.</summary>
-        public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            if (level == LogLevel.Warning) Warnings.Enqueue(formatter(state, exception));
-        }
-        /// <summary>Releases nothing, because the provider holds no resources.</summary>
-        public void Dispose() { }
-    }
-
-    /// <summary>
-    /// Builds an app on a free loopback port with backoffice paths under <c>/portal</c>, the body Tag Helper component
-    /// and response compression registered.
-    /// </summary>
-    private static WebApplication CreateApp()
-    {
-        var builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Logging.ClearProviders();
-        builder.Services.AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths("/portal"));
-        builder.Services.AddControllersWithViews();
-        builder.Services.AddTransient<ITagHelperComponent, BackOfficeBodyTagHelperComponent>();
-        builder.Services.Configure<GlobalSettings>(options => options.UseHttps = false);
-#pragma warning disable CS0618
-        builder.Services.Configure<BackOfficeTokenCookieSettings>(options => { options.SameSite = "Strict"; options.SiteName = ""; });
-#pragma warning restore CS0618
-        builder.Services.AddResponseCompression();
-        return builder.Build();
-    }
-
-    /// <summary>Returns the address the started <paramref name="app"/> listens on.</summary>
-    private static string Address(WebApplication app)
-        => app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
 }
