@@ -36,16 +36,17 @@ public sealed class HealthCheckTests
     /// <c>X-Forwarded-Prefix</c>, an error for the unapplied change, and a warning that counts the requests outside the
     /// virtual path and names the latest.
     /// </summary>
-    [Fact]
-    public async Task Version_path_base_patch_and_routing_problems_are_reported()
+    [Theory]
+    [InlineData("17.99.0")]
+    [InlineData("19.0.0")]
+    public async Task Version_path_base_patch_and_routing_problems_are_reported(string release)
     {
         var status = new VirtualPathStatus();
         status.AssetsPrepared(19);
         status.Problem("Umbraco's /umbraco/login/login.js no longer contains backofficePath, so that part of the fix is not applied.");
         status.RequestOutside("/healthz");
         status.RequestOutside("/umbraco");
-        var newest = UmbracoUnderTest.SupportedReleases[^1];
-        var results = await CheckAsync("/portal", "", status, new Version(newest.Major, newest.Minor + 1, 0));
+        var results = await CheckAsync("/portal", "", status, Version.Parse(release));
         Assert.Equal([StatusResultType.Warning, StatusResultType.Error, StatusResultType.Error, StatusResultType.Warning],
             results.Select(result => result.ResultType));
         Assert.Contains($"supports Umbraco {ApplicationVirtualPathFixComposer.SupportedUmbracoVersions}", results[0].Message, StringComparison.Ordinal);

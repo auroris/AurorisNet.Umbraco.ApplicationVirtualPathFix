@@ -126,34 +126,23 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
     }
 
     /// <summary>
-    /// The Umbraco releases the package supports, such as <c>17.5.0 to 18.3.1</c>, or <see langword="null"/> when the
-    /// build recorded none.
+    /// The exact Umbraco releases validated for this package, recorded by the build.
     /// </summary>
-    internal static string? SupportedUmbracoVersions
-        => SupportedRange() is { } range ? $"{range.Minimum} to {range.Maximum}" : null;
+    private static readonly Version[] SupportedReleases = typeof(ApplicationVirtualPathFixComposer).Assembly
+        .GetCustomAttributes<AssemblyMetadataAttribute>().Single(attribute => attribute.Key == "UmbracoReleases").Value!
+        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Version.Parse).ToArray();
+
+    /// <summary>The supported Umbraco releases, listed for startup warnings and the health check.</summary>
+    internal static string SupportedUmbracoVersions => string.Join(", ", SupportedReleases.AsEnumerable());
 
     /// <summary>
-    /// Returns whether the package supports the Umbraco release <paramref name="umbraco"/> reports, which is also true
-    /// when the build recorded no supported range.
+    /// Returns whether the package was validated against the exact release <paramref name="umbraco"/> reports.
+    /// Prereleases are not validated by testing their final release.
     /// </summary>
     internal static bool SupportsUmbraco(IUmbracoVersion umbraco)
     {
-        if (SupportedRange() is not { } range)
-            return true;
-        var release = AssetPatcher.Release(umbraco.SemanticVersion);
-        return release >= range.Minimum && release <= range.Maximum;
-    }
-
-    /// <summary>
-    /// Returns the first and last Umbraco releases the package supports, from the metadata the build adds, or
-    /// <see langword="null"/> when either is missing.
-    /// </summary>
-    private static (Version Minimum, Version Maximum)? SupportedRange()
-    {
-        var metadata = typeof(ApplicationVirtualPathFixComposer).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().ToArray();
-        return Version.TryParse(metadata.FirstOrDefault(attribute => attribute.Key == "UmbracoMinimumVersion")?.Value, out var minimum)
-            && Version.TryParse(metadata.FirstOrDefault(attribute => attribute.Key == "UmbracoMaximumVersion")?.Value, out var maximum)
-                ? (minimum, maximum) : null;
+        var version = umbraco.SemanticVersion;
+        return string.IsNullOrEmpty(version.Prerelease) && SupportedReleases.Contains(AssetPatcher.Release(version));
     }
 
     /// <summary>Logs a warning when the site runs an Umbraco release the package does not support.</summary>
@@ -163,8 +152,8 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
         if (SupportsUmbraco(umbraco))
             return;
 
-        // NuGet restore usually stops an unsupported site with NU1107. A site that references Umbraco.Cms.Web.Common or
-        // Umbraco.Cms.StaticAssets directly gets only warning NU1608 and still runs.
+        // NuGet's range can admit untested releases between its bounds. Direct references can also override the
+        // dependency range with NU1608, so check the validated list at runtime.
         services.GetRequiredService<ILoggerFactory>().CreateLogger(Name).LogWarning(
             "{Package} supports Umbraco {Supported}, but this site runs Umbraco {Actual}. Some of its fixes patch the "
             + "backoffice scripts of those releases and may not apply. Install a package release that supports the site's "

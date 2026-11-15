@@ -36,8 +36,8 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <!--
       Reference the Umbraco packages the package uses rather than the Umbraco.Cms meta-package, so sites that
-      assemble Umbraco from individual packages (for example with ImageSharp2) can install it. The range covers only
-      releases the tests have passed, so restore stops a site on any other release. NuGet compiles the package against
+      assemble Umbraco from individual packages (for example with ImageSharp2) can install it. The range spans the
+      tested releases but can admit untested releases between them; startup checks the exact list. NuGet compiles against
       the oldest release in the range, which keeps it to APIs every supported release has. Umbraco.Cms.StaticAssets
       carries the backoffice scripts the package patches, so add a release to the range only after its tests pass.
     -->
@@ -50,6 +50,10 @@
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>UmbracoMaximumVersion</_Parameter1>
       <_Parameter2>$(UmbracoMaximumVersion)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UmbracoReleases</_Parameter1>
+      <_Parameter2>$(UmbracoReleases)</_Parameter2>
     </AssemblyAttribute>
     <Using Include="Microsoft.AspNetCore.Builder" />
     <Using Include="Microsoft.AspNetCore.Http" />

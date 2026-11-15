@@ -81,22 +81,23 @@ no additional query parameter is needed.
 ## Hosting and compatibility
 
 Use the package with **Umbraco 17.5.0 to 18.3.1 on .NET 10**. It depends on that
-range of `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`, and every Umbraco
-release in it passed the fast and browser tests when it was added, and again after
-any change that might affect it. The package
-applies the patches for the site's own Umbraco release. Restore fails with a version
-conflict (NU1107) on any other release, so upgrade the package when you upgrade
+range of `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`. Every release listed
+in `UmbracoReleases` in `Directory.Build.props` passed the fast and browser tests
+when it was added, and again after any change that might affect it. The package
+applies the patches for the site's own Umbraco release. Restore normally fails with a
+version conflict (NU1107) outside the range, so upgrade the package when you upgrade
 Umbraco beyond the range. A site that references those two packages directly at
-another version gets only a NuGet warning (NU1608); the package then logs a warning
-at startup, and the health check reports the unsupported version. Asset preparation
-also logs warnings for missing or ambiguous bundles, and for each patch that it skips
+another version gets only a NuGet warning (NU1608). The package checks its exact
+validated release list at startup and in the health check, warning for any unlisted
+version or prerelease. Asset preparation also logs warnings for missing or ambiguous
+bundles, and for each patch that it skips
 because its pattern no longer matches the expected number of times.
 
 An Umbraco release published after a package release can fall inside its range, such
-as a later Umbraco 17 release. Restore accepts it before it has been tested, and the
-package applies the patches for the nearest earlier release of the same major version.
-If Umbraco changed those files, the warnings above report each patch that no longer
-applies.
+as a later Umbraco 17 release. Restore accepts it before it has been tested, but the
+startup and health-check warnings still report it as unsupported. The package attempts
+the patches whose version bounds include that release. If Umbraco changed those files,
+asset preparation reports each patch that no longer applies.
 
 Requests must reach the site with the prefix still in the path, or with the path
 base already set: by IIS for a child application, or by

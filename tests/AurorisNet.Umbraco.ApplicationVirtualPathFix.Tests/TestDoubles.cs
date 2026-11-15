@@ -14,14 +14,14 @@ internal sealed class TestBackOfficePaths(string prefix) : IBackOfficePathGenera
     public string BackOfficeAssetsPath => BackOfficeVirtualDirectory + "/" + BackOfficeCacheBustHash;
 }
 
-/// <summary>Reports <paramref name="version"/> as the site's Umbraco version.</summary>
-internal sealed class TestUmbracoVersion(Version version) : IUmbracoVersion
+/// <summary>Reports <paramref name="version"/> with an optional <paramref name="prerelease"/> as the site's Umbraco version.</summary>
+internal sealed class TestUmbracoVersion(Version version, string prerelease = "") : IUmbracoVersion
 {
     public Version Version => version;
     public string Comment => "";
     public Version AssemblyVersion => Version;
     public Version AssemblyFileVersion => Version;
-    public SemVersion SemanticVersion => new(version.Major, version.Minor, version.Build);
+    public SemVersion SemanticVersion => new(version.Major, version.Minor, version.Build, prerelease);
 }
 
 /// <summary>

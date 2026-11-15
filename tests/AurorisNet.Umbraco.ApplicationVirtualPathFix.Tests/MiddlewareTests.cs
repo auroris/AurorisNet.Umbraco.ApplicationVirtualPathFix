@@ -100,12 +100,13 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
 
     /// <summary>
     /// Checks that startup logs one warning naming the supported releases and the site's release when the site runs an
-    /// Umbraco release newer or older than the supported range, and none for the release under test.
+    /// unlisted Umbraco release, including one inside the dependency range, and none for the release under test.
     /// </summary>
     [Theory]
     [InlineData("supported")]
     [InlineData("newer")]
     [InlineData("older")]
+    [InlineData("unlisted")]
     public void Startup_warns_only_for_an_unsupported_Umbraco_release(string release)
     {
         var supported = UmbracoUnderTest.SupportedReleases;
@@ -113,6 +114,7 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         {
             "newer" => new Version(supported[^1].Major, supported[^1].Minor, supported[^1].Build + 1),
             "older" => new Version(supported[0].Major - 1, 0, 0),
+            "unlisted" => new Version(17, 99, 0),
             _ => UmbracoUnderTest.Release,
         };
         using var logger = new RecordedLogs();

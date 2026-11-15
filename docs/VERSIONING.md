@@ -1,6 +1,6 @@
 # Version numbering and releases
 
-Choose a package release whose supported range includes the site's Umbraco release.
+Choose a package release whose validated releases include the site's Umbraco release.
 The first three numbers of a package version are the newest Umbraco release it
 supports, and the fourth counts our releases for that Umbraco release. For example,
 `AurorisNet.Umbraco.ApplicationVirtualPathFix` version `18.3.1.2` is our second
@@ -23,11 +23,14 @@ release that adds an older Umbraco release, such as a new 17.x, keeps the first 
 numbers and takes the next count. A release can also move the lower end of the range;
 the package's dependencies show it.
 
-The package accepts only the Umbraco releases in its range, so restore fails with a
-version conflict (NU1107) on any other release. A floating reference such as `18.*`
-installs the newest package whose newest supported release is an 18.x, on Umbraco 17
-as well as 18. If that package no longer supports the site's Umbraco release, restore
-fails; reference the last package release that supports it instead. The [supported-version table](../README.md#supported-versions)
+NuGet normally rejects Umbraco releases outside the dependency range with a version
+conflict (NU1107); direct dependency references can override it with warning NU1608.
+The range can admit untested releases between its bounds. Startup and the health check
+warn for any version absent from the package's validated release list. A floating
+reference such as `18.*` installs the newest package whose newest supported release
+is an 18.x, on Umbraco 17 as well as 18. If that package's range no longer includes the
+site's Umbraco release, restore fails; reference the last package release that supports
+it instead. The [supported-version table](../README.md#supported-versions)
 lists each range.
 
 ## Supported releases and branches

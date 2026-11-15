@@ -27,9 +27,9 @@ internal static partial class AssetPatcher
     internal static AssetPatch[] For(Version umbraco) => Array.FindAll(BackOfficeAssetPatches.Patches, patch => patch.AppliesTo(umbraco));
 
     /// <summary>
-    /// Returns the entries that apply to the web root file at <paramref name="path"/>, whatever its build hash, for the
-    /// Umbraco release <paramref name="umbraco"/>, in list order. An empty result means the package serves the file
-    /// unchanged.
+    /// Returns entries whose filename matches <paramref name="path"/>, whatever its build hash, for the Umbraco release
+    /// <paramref name="umbraco"/>, in list order. This does not check <see cref="AssetPatch.Contains"/>; use
+    /// <see cref="Locate"/> to select installed files.
     /// </summary>
     internal static AssetPatch[] For(string path, Version umbraco)
         => Array.FindAll(For(umbraco), patch => string.Equals(patch.Path, NormalizePath(path), StringComparison.OrdinalIgnoreCase));

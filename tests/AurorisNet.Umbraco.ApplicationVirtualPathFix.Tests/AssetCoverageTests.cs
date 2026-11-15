@@ -23,6 +23,7 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
         const string diagnosticModule = "/umbraco/backoffice/packages/core/utils/index.js";
         var references = new Regex("""["'`(]/umbraco/(?:backoffice|website|login)/""");
         var unexpected = new List<string>();
+        var patches = LocatePatches(assets.Files, UmbracoUnderTest.Patches);
         var examined = 0;
         foreach (var (path, file) in assets.Enumerate("/umbraco"))
         {
@@ -34,13 +35,64 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
                 // Remove only the known diagnostic constant, so any other URL added to this file still fails the test.
                 source = source.Replace("const U = \"/umbraco/backoffice/\";", "", StringComparison.Ordinal);
             }
-            else if (AssetPatcher.For(path, UmbracoUnderTest.Release) is { Length: > 0 } patches)
-                source = AssetPatcher.Patch(patches, source, Context, Unapplied);
+            else
+                source = AssetPatcher.Patch(patches[path], source, Context, Unapplied);
             foreach (Match match in references.Matches(source))
                 unexpected.Add($"{path}:{source.AsSpan(0, match.Index).Count('\n') + 1}: {match.Value}");
         }
         Assert.True(examined > 0, "The restored asset tree must not be empty.");
         Assert.True(unexpected.Count == 0, "Unpatched asset references:\n" + string.Join('\n', unexpected));
+    }
+
+    /// <summary>
+    /// Checks that a filename match excluded by <see cref="AssetPatch.Contains"/> still fails both coverage scans.
+    /// An edit's source location also counts only in the bundle that receives the edit.
+    /// </summary>
+    [Fact]
+    public async Task Coverage_uses_only_the_bundle_selected_by_content()
+    {
+        const string excluded = "/block/constants-AAAAAAAA.js";
+        const string selected = "/block/constants-BBBBBBBB.js";
+        const string asset = """const asset = "/umbraco/backoffice/assets/logo.svg";""";
+        const string sourceFile = "src/url.ts";
+        const string sourceLine = "const url = serverUrl + path;";
+        var root = Directory.CreateTempSubdirectory("asset-coverage-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "block"));
+            File.WriteAllText(root + excluded, asset + sourceLine);
+            File.WriteAllText(root + selected, asset + sourceLine + "/* selected */");
+            using var files = new PhysicalFileProvider(root);
+            Assert.Equal(2, AssetPatcher.Locate(files, new AssetPatch { Path = "/block/constants-????????.js" }).Length);
+            var patch = new AssetPatch
+            {
+                Path = "/block/constants-????????.js",
+                Contains = "/* selected */",
+                MovesAssetUrls = true,
+                Edits = [new()
+                {
+                    Find = sourceLine,
+                    Replace = "const url = path;",
+                    Origin = new() { File = sourceFile, Code = sourceLine },
+                }],
+            };
+            var patches = LocatePatches(files, [patch]);
+            Assert.Equal(selected, Assert.Single(patches).Key);
+            foreach (var path in new[] { excluded, selected })
+            {
+                var patched = AssetPatcher.Patch(patches[path], await ReadAsync(files.GetFileInfo(path)), Context, Unapplied);
+                Assert.Equal(path == excluded, AssetPatcher.QuotedAssetRoot().IsMatch(patched));
+                Assert.Equal(path == selected, IsPatched(sourceFile, asset, [path], patches));
+                Assert.Equal(path == selected, IsPatched(sourceFile, sourceLine, [path], patches));
+            }
+            // A source copied into both bundles must be fixed in both.
+            Assert.False(IsPatched(sourceFile, asset, [selected, excluded], patches));
+            Assert.False(IsPatched(sourceFile, sourceLine, [selected, excluded], patches));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     /// <summary>
@@ -55,6 +107,7 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
         // against the source maps, or when its bundle has its asset URLs moved. Every review must still match a line;
         // a review without one means Umbraco changed that code.
         var sources = await ReadSourcesAsync();
+        var patches = LocatePatches(assets.Files, UmbracoUnderTest.Patches);
         var reviews = Reviews.Where(review => review.AppliesTo(UmbracoUnderTest.Release)).ToArray();
         var unexpected = new List<string>();
         var found = new HashSet<ReviewedLine>();
@@ -65,7 +118,7 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
             {
                 var line = lines[index].Trim();
                 if (line.StartsWith("//", StringComparison.Ordinal) || line.StartsWith("/*", StringComparison.Ordinal)
-                    || line.StartsWith('*') || !ConstructsUrl(line, file) || IsPatched(file, line, bundles))
+                    || line.StartsWith('*') || !ConstructsUrl(line, file) || IsPatched(file, line, bundles, patches))
                     continue;
                 if (reviews.FirstOrDefault(review => review.File == file && line.Contains(review.Code, StringComparison.Ordinal)) is { } known)
                     found.Add(known);
@@ -96,14 +149,21 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
             || (!file.EndsWith(".gen.ts", StringComparison.Ordinal) && RootPath().IsMatch(line));
 
     /// <summary>
-    /// Returns whether a patch for the Umbraco release under test changes <paramref name="line"/>: an edit names it, or
-    /// it contains a quoted asset URL and one of its <paramref name="bundles"/> has its asset URLs moved.
+    /// Resolves entries with the same filename and content filters as the production file provider. An ambiguous or
+    /// missing file fails the test; production would skip that entry and warn.
     /// </summary>
-    private static bool IsPatched(string file, string line, IEnumerable<string> bundles)
-        => UmbracoUnderTest.Patches.SelectMany(patch => patch.Edits).Any(edit =>
-                edit.Origin is { } origin && origin.File == file && line.Contains(origin.Code, StringComparison.Ordinal))
-            || (AssetPatcher.QuotedAssetRoot().IsMatch(line)
-                && bundles.Any(bundle => AssetPatcher.For(bundle, UmbracoUnderTest.Release).Any(patch => patch.MovesAssetUrls)));
+    private static ILookup<string, AssetPatch> LocatePatches(IFileProvider files, IEnumerable<AssetPatch> patches)
+        => patches.Select(patch => (Assert.Single(AssetPatcher.Locate(files, patch)).Path, Patch: patch))
+            .ToLookup(entry => entry.Path, entry => entry.Patch, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns whether every bundle containing <paramref name="line"/> receives a patch for it: an edit names the
+    /// source line, or it contains a quoted asset URL and that bundle has its asset URLs moved.
+    /// </summary>
+    private static bool IsPatched(string file, string line, IEnumerable<string> bundles, ILookup<string, AssetPatch> patches)
+        => bundles.All(bundle => patches[bundle].Any(patch =>
+            patch.Edits.Any(edit => edit.Origin is { } origin && origin.File == file && line.Contains(origin.Code, StringComparison.Ordinal))
+            || (patch.MovesAssetUrls && AssetPatcher.QuotedAssetRoot().IsMatch(line))));
 
     /// <summary>
     /// A line of Umbraco's source that needs no patch: its file, a fragment of its code, and the reason. <c>From</c> and

@@ -99,8 +99,9 @@ Bundle hash changes alone need no patch edits. Code patches write minified
 identifiers as `@name` placeholders, named after Umbraco's TypeScript source, so a
 rebuild that only renames variables needs no edits either. A repeated `@name` must
 match the same identifier, and `@@` stands for a literal `@`. A behavior change
-expects exactly one match; URL rewrites expect one or more. The package's dependency
-range still admits only the releases that have passed these checks.
+expects exactly one match; URL rewrites expect one or more. The package embeds the
+validated `UmbracoReleases` list for startup and health-check warnings. The dependency
+range spans that list but can also admit untested releases between its bounds.
 
 `PatchOriginTests` checks each patch against Umbraco's source maps: every match of
 an edit must come from the line of Umbraco's TypeScript that the edit names, so a
@@ -112,14 +113,16 @@ file, the failure names the bundle that is now built from the patch's sources.
 
 `AssetCoverageTests` independently scans the restored JavaScript and CSS for
 root-absolute asset references. New or renamed files fail the scan unless a patch
-handles them or an explicit exception explains the reference. It also reads
-Umbraco's TypeScript from the bundles' source maps, and the unminified apps that
+handles them or an explicit exception explains the reference. Both scans use the
+production file locator, including `Contains` filters, to resolve each patch to
+exactly one installed file. It also reads Umbraco's TypeScript from the bundles'
+source maps, and the unminified apps that
 ship without maps, and finds each line that builds a URL in a way that can lose the
 virtual path: the server URL joined to a dynamic value, `new URL` with a base, the
 bare origin used to build a URL, and root-absolute paths. A line counts as patched when
-an edit names it, which `PatchOriginTests` confirms, or when its bundle has its asset
-URLs moved. Any other line must carry a review in the test. A new or changed line
-fails, and so does a review that Umbraco's code no longer matches.
+each bundle containing it receives an edit that names it, which `PatchOriginTests`
+confirms, or has its asset URLs moved. Any other line must carry a review in the test.
+A new or changed line fails, and so does a review that Umbraco's code no longer matches.
 These are conservative line checks, not a JavaScript parser; inspect each new match
 when upgrading Umbraco. Patch checks and the browser journey cover the known URL
 corrections.
@@ -142,8 +145,9 @@ fails only when it runs, as Umbraco 18 gave the pipeline filter's full construct
 two more parameters, so the composer uses the constructor and properties that both
 versions have. `SupportedReleasesTests` resolves every type and member the compiled
 package refers to against the release under test, which finds such a change without
-running the code. It also checks that the dependency range matches `UmbracoReleases`,
-that the release under test is listed, and that every entry's `From` and `Before`
+running the code. It also checks that the dependency range spans `UmbracoReleases`
+and the package embeds and accepts that exact list, that the release under test is
+listed, and that every entry's `From` and `Before`
 are release numbers covering at least one supported release. `HealthCheckTests`
 covers the health check's results for a site at the root, a
 working site under a virtual path, and a site with an unsupported Umbraco version, a

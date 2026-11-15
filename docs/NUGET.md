@@ -51,9 +51,12 @@ Start the website and open `/SomeTestPath/umbraco`. Standard Umbraco startup wit
 The first three numbers of the package version are the newest Umbraco release the
 package supports, and the fourth counts our releases for it. The package's
 dependencies show the oldest supported release. Some fixes patch the JavaScript that
-Umbraco serves, so the package accepts only the Umbraco releases its tests have
-passed: on any other release, restore fails with a version conflict. When you upgrade
-Umbraco beyond the supported range, upgrade the package too.
+Umbraco serves, so support is limited to the releases its tests have passed. NuGet's
+dependency range can admit untested releases between its bounds; startup and the
+health check warn for any version absent from the validated release list. Outside
+the range, restore normally fails with a version conflict, unless direct dependency
+references override it with a NuGet warning. When you upgrade Umbraco to an unlisted
+release, upgrade the package too.
 
 ## Documentation
 

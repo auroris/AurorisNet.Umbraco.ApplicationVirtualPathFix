@@ -35,7 +35,7 @@ fixes through Umbraco's composer and middleware pipeline.
   Check shows whether every fix applied and how requests reach the site.
 
 Some fixes modify the JavaScript that Umbraco serves, so each package release
-supports a range of Umbraco releases that its tests have passed. See
+supports the Umbraco releases that its tests have passed. See
 [Fixes and compatibility](docs/FIXES.md) for the affected behavior, hosting
 requirements and validation scope.
 
@@ -46,8 +46,13 @@ requirements and validation scope.
 | 18.3.1.2 and later | 17.5.0 to 18.3.1 | .NET 10 |
 | [18.3.1.1](https://www.nuget.org/packages/AurorisNet.Umbraco.ApplicationVirtualPathFix/18.3.1.1) | 18.3.1 | .NET 10 |
 
-On any Umbraco release outside a package's range, restore fails with a version
-conflict. The source of every release from 18.3.1.2 on is on `main`; the
+The exact validated releases are listed in
+[`UmbracoReleases`](Directory.Build.props). NuGet's dependency range spans the oldest
+and newest of these, so it can also admit untested releases between them. The package
+warns at startup and in the health check for any unlisted version. Outside the range,
+restore normally fails with a version conflict; direct dependency references can
+override it with a NuGet warning. The source of every release from 18.3.1.2 on is on
+`main`; the
 [`umbraco/18.3.1`](https://github.com/auroris/UmbracoApplicationVirtualPathFix/tree/umbraco/18.3.1)
 branch holds the source of 18.3.1.1.
 

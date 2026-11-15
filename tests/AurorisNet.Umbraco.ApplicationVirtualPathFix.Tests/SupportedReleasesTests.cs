@@ -10,7 +10,7 @@ public sealed class SupportedReleasesTests
 {
     /// <summary>
     /// Checks that <c>UmbracoReleases</c> lists distinct releases oldest first, and that the package's dependency range
-    /// runs from the first of them to the last.
+    /// runs from the first of them to the last. The package must embed and accept exactly the same list.
     /// </summary>
     [Fact]
     public void The_package_range_spans_the_listed_releases()
@@ -21,7 +21,17 @@ public sealed class SupportedReleasesTests
         var metadata = typeof(ApplicationVirtualPathFixComposer).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().ToArray();
         Assert.Equal(releases[0], Version.Parse(metadata.Single(attribute => attribute.Key == "UmbracoMinimumVersion").Value!));
         Assert.Equal(releases[^1], Version.Parse(metadata.Single(attribute => attribute.Key == "UmbracoMaximumVersion").Value!));
-        Assert.Equal($"{releases[0]} to {releases[^1]}", ApplicationVirtualPathFixComposer.SupportedUmbracoVersions);
+        Assert.Equal(releases, metadata.Single(attribute => attribute.Key == "UmbracoReleases").Value!
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Version.Parse));
+        Assert.Equal(string.Join(", ", releases.AsEnumerable()), ApplicationVirtualPathFixComposer.SupportedUmbracoVersions);
+        Assert.All(releases, release => Assert.True(ApplicationVirtualPathFixComposer.SupportsUmbraco(new TestUmbracoVersion(release))));
+    }
+
+    /// <summary>A prerelease does not inherit support from its validated final release.</summary>
+    [Fact]
+    public void A_prerelease_is_not_a_validated_release()
+    {
+        Assert.False(ApplicationVirtualPathFixComposer.SupportsUmbraco(new TestUmbracoVersion(UmbracoUnderTest.Release, "rc.1")));
     }
 
     /// <summary>
