@@ -6,11 +6,11 @@ Adds Umbraco releases to the releases the package supports.
 .DESCRIPTION
 Adds each release to UmbracoReleases in Directory.Build.props, keeping the list oldest first, and sets
 UmbracoMinimumVersion, UmbracoMaximumVersion and UmbracoVersion to the oldest and newest listed releases. Then writes
-the new range, such as 17.5.0 to 18.3.2, between the <!-- umbraco-releases --> and <!-- /umbraco-releases --> markers
-in README.md and the Markdown files in docs. nuget.org shows docs/NUGET.md without HTML, so that file states the range
-as plain text, and the script replaces the old range there. A release that is already listed changes nothing. A
-release of a major version that the list does not include stops the script, because supporting it takes the changes
-that docs/DEVELOPING.md describes.
+each major version's releases, such as 18.0.0 to 18.3.2, between its <!-- umbraco-releases 18 --> and
+<!-- /umbraco-releases --> markers in README.md and the Markdown files in docs. nuget.org shows docs/NUGET.md without
+HTML, so that file lists the releases as plain text after "running Umbraco ", newest major version first, and the
+script rewrites that list. A release that is already listed changes nothing. A release of a major version that the
+list does not include stops the script, because supporting it takes the changes that docs/DEVELOPING.md describes.
 
 .PARAMETER Releases
 The releases to add, such as 18.3.2. A value can list several, separated by commas.
@@ -56,8 +56,6 @@ if (-not $list.Success) { throw 'Directory.Build.props has no UmbracoReleases.' 
 $listed = [Collections.Generic.List[version]]::new()
 $list.Groups[1].Value.Split(';', $split) | ForEach-Object { $listed.Add([version] $_) }
 $majors = @($listed | ForEach-Object Major | Sort-Object -Unique)
-$before = @($listed | Sort-Object)
-$oldRange = "$($before[0]) to $($before[-1])"
 
 $added = foreach ($text in $Releases) {
     if ($text -notmatch '^\d+\.\d+\.\d+$') { throw "$text is not a release number such as 18.3.2." }
@@ -77,18 +75,36 @@ $text = $text -replace '<UmbracoReleases>[^<]*</UmbracoReleases>', "<UmbracoRele
 $text = $text -replace '<UmbracoMinimumVersion>[^<]*</UmbracoMinimumVersion>', "<UmbracoMinimumVersion>$($sorted[0])</UmbracoMinimumVersion>"
 $text = $text -replace '<UmbracoMaximumVersion>[^<]*</UmbracoMaximumVersion>', "<UmbracoMaximumVersion>$($sorted[-1])</UmbracoMaximumVersion>"
 $text = $text -replace '<UmbracoVersion>[^<]*</UmbracoVersion>', "<UmbracoVersion>$($sorted[-1])</UmbracoVersion>"
-Write-Text $propsPath $text $props.Bom
+$writes = [Collections.Generic.List[object]]::new()
+$writes.Add([pscustomobject]@{ Path = $propsPath; Text = $text; Bom = $props.Bom })
 
-# The documents state the range between markers, so the update cannot touch examples that mention other releases.
-$range = "$($sorted[0]) to $($sorted[-1])"
+# Each major version's releases, newest major version first: "18.0.0 to 18.3.2", or a release on its own.
+$ranges = @($sorted | Group-Object Major | Sort-Object { [int] $_.Name } -Descending | ForEach-Object {
+    [pscustomobject]@{ Major = $_.Name; Range = $_.Count -eq 1 ? "$($_.Group[0])" : "$($_.Group[0]) to $($_.Group[-1])" }
+})
+$rangeOf = @{}
+$ranges | ForEach-Object { $rangeOf[$_.Major] = $_.Range }
+$each = @($ranges.Range)
+$nugetRanges = $each.Count -le 2 ? ($each -join ' or ') : ((@($each[0..($each.Count - 2)]) -join ', ') + ' or ' + $each[-1])
+
+# Markers and the NuGet page's list hold the releases, so examples that mention other releases stay as they are.
+$rangePattern = '\d+\.\d+\.\d+(?: to \d+\.\d+\.\d+)?'
+$nugetList = "(?<=running Umbraco )$rangePattern(?:(?:,? or|,) $rangePattern)*"
+$nuget = [IO.Path]::GetFullPath((Join-Path $Repository 'docs' 'NUGET.md'))
 $documents = @(Join-Path $Repository 'README.md') + @(Get-ChildItem (Join-Path $Repository 'docs') -Filter *.md -ErrorAction SilentlyContinue | ForEach-Object FullName)
 foreach ($path in $documents | Where-Object { Test-Path -LiteralPath $_ }) {
     $document = Read-Text $path
-    $updated = [regex]::Replace($document.Text, '(<!-- umbraco-releases -->)[^<]*(<!-- /umbraco-releases -->)', "`${1}$range`${2}")
-    if ([IO.Path]::GetFullPath($path) -eq [IO.Path]::GetFullPath((Join-Path $Repository 'docs' 'NUGET.md'))) {
-        $updated = $updated.Replace($oldRange, $range)
+    $updated = $document.Text -creplace '(<!-- umbraco-releases (\d+) -->)[^<]*(<!-- /umbraco-releases -->)', {
+        $range = $rangeOf[$_.Groups[2].Value]
+        $range ? $_.Groups[1].Value + $range + $_.Groups[3].Value : $_.Value
     }
-    if ($updated -cne $document.Text) { Write-Text $path $updated $document.Bom }
+    if ([IO.Path]::GetFullPath($path) -eq $nuget) {
+        if (-not [regex]::IsMatch($updated, $nugetList)) { throw 'docs/NUGET.md has no list of supported releases after "running Umbraco ".' }
+        $updated = [regex]::Replace($updated, $nugetList, $nugetRanges)
+    }
+    if ($updated -cne $document.Text) { $writes.Add([pscustomobject]@{ Path = $path; Text = $updated; Bom = $document.Bom }) }
 }
+# Write nothing until every document has been read and checked.
+foreach ($write in $writes) { Write-Text $write.Path $write.Text $write.Bom }
 
 $added

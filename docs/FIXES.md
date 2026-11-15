@@ -1,222 +1,98 @@
-# Fixes for Umbraco 17.5 to 18.3
+# Fixes and compatibility
 
-The package keeps the backoffice's URLs inside the application virtual path
-configured by `Umbraco:CMS:Hosting:ApplicationVirtualPath`. It registers through
-the standard `.AddComposers()` startup and uses an Umbraco pipeline filter, placed
-ahead of Umbraco's own filters, to apply the path base and its middleware.
+The package keeps the backoffice's URLs inside the application virtual path set by
+`Umbraco:CMS:Hosting:ApplicationVirtualPath`. It registers through `.AddComposers()`
+and sets the path base in a pipeline filter that runs before Umbraco's middleware.
 
-## Corrected behavior
+## What it fixes
 
-| Umbraco behavior | Result with the package |
+| Umbraco behavior | With the package |
 |---|---|
-| The backoffice asset rewrite expects the virtual path in `Request.Path`, after the host has moved it into `Request.PathBase`. | Cache-busted asset requests reach Umbraco's script and stylesheet handlers. |
-| Import maps contain root-absolute core and package URLs. | Root-absolute imports and scopes carry the application prefix, and Umbraco can add its asset hash. |
-| The backoffice app builds API and OAuth URLs from the origin and `/umbraco`. | Under a virtual path the app's server URL is the browser's origin plus the configured path, and its backoffice path includes the configured path too. OAuth callbacks are registered with that prefix. Sites at the root keep Umbraco's defaults. |
-| A backoffice bookmark uses different casing for the application prefix, which the server accepts but the SPA router does not. | Backoffice HTML navigations redirect to the configured prefix casing, retaining the query string. |
-| The slim login script uses root URLs for login, two-factor verification and its shared API client, and in Umbraco 17.5, 17.6 and 18.0 for the password-reset and invitation requests of its own API client. | The served script uses the application prefix for those requests, including public package manifests, password resets and invitations. |
-| Password-reset and invitation emails link to `/umbraco/login` at the host root. | The emailed links include the application path. |
-| Media stored outside `wwwroot` (an absolute `UmbracoMediaPhysicalRootPath`, or a provider such as Azure Blob Storage) is mounted only at the prefixed path, which requests under a path base never match. | Media is served under the prefix from any media file system, and ImageSharp crops and resizes apply to it. |
-| The thumbnail URL assembler adds the prefix again to signed media URLs, invalidating their image-processing signatures. | Already-prefixed media paths retain one prefix, their original query string and any URL fragment. |
-| Basic authentication, the OpenAPI documents and the management API contract compare `Request.Path` with a path that includes the virtual path. With `RedirectToLoginPage`, every visitor is redirected in a loop. | Those requests see the path shape Umbraco expects, so the basic-authentication login page and the OpenAPI documents work under the prefix: Swashbuckle's under `/umbraco/swagger` on Umbraco 17, and those under `/umbraco/openapi` on Umbraco 18. |
-| The logo in the header's system-information popover uses a root-absolute URL. | The logo loads under the configured application prefix and asset hash. |
-| After sign-out, the backoffice's sign-in view first requests its logos from the host root, before it reads the server URL. | The view starts with the site's URL, so its logos load under the prefix from the first render. |
-| The error screen and installer/upgrader layout load their illustration from the host root. | Both load the illustration from the configured backoffice asset root. |
-| The backoffice stylesheet loads Monaco's codicon font from the host root. | The font loads relative to the stylesheet under the application prefix, including icons in the editor's Find widget. |
-| The block grid editor loads its default layout stylesheet from `/umbraco/backoffice/css/...`, and resolves a custom layout stylesheet's site path against the host root. | Both stylesheets load under the prefix. |
-| The block catalogue and the block type cards in a block editor's settings resolve thumbnail site paths against the host root. | Block thumbnails load under the prefix. |
-| The media upload field and the preview prepend the server URL to media and page URLs that already include the virtual path. | Image previews, file links and the preview frame use the URL once. |
-| The website's preview badge ends preview with a request to the host root, so preview stays on. | End preview reaches the management API under the prefix and reloads the page without preview. |
-| Tiptap's default stylesheet, Monaco's worker scripts and the dark/high-contrast theme stylesheets use root URLs. | They load from the configured backoffice asset root, including the application prefix and asset hash. |
-| A rich text stylesheet saved with the stylesheet root, such as `/css/rte.css`, no longer matches the server's root, which includes the virtual path, so the root is added twice. | Stylesheets saved with or without the root load from it once. |
-| Basic-authentication routes already include the application prefix, so MVC adds it twice to form actions and redirects. | Login forms and two-factor redirects contain the prefix once; `Url.Content` still sees the original path base. |
-| The stylesheet of Umbraco's built-in Page Not Found, No Content, Maintenance and Upgrading pages loads its fonts and background from the root. | They load from beside the stylesheet, under the prefix. |
-| Initial authentication attempts a token refresh before a fresh browser has received a refresh cookie. | The auth wrapper starts the normal sign-in flow directly when no session can exist. Existing sessions continue through Umbraco's token validation and renewal. |
+| The asset rewrite looks for the virtual path in `Request.Path`, after the host has moved it to `Request.PathBase`. | Cache-busted script and stylesheet requests reach Umbraco's handlers. |
+| Import maps contain root-absolute URLs. | Imports and scopes carry the prefix. |
+| The backoffice builds API and OAuth URLs from the origin and `/umbraco`. | It uses the origin plus the configured path, and OAuth callbacks include the prefix. |
+| A bookmark with a differently cased prefix reaches the server, but the backoffice router rejects it. | Backoffice page requests redirect to the configured casing and keep the query string. |
+| The login page sends its requests to the host root. | Login, two-factor, password-reset and invitation requests use the prefix. |
+| Password-reset and invitation emails link to `/umbraco/login` at the host root. | The links include the path. |
+| Media outside `wwwroot`, or in a provider such as Azure Blob Storage, is mounted at the prefixed path, which requests under a path base never match. | Media is served under the prefix, with ImageSharp crops and resizes. |
+| The thumbnail URL assembler prefixes signed media URLs a second time, which breaks their signatures. | Prefixed media URLs keep one prefix, their query string and their fragment. |
+| Basic authentication, the API documents and the management API contract compare `Request.Path` with a path that includes the virtual path, so basic authentication redirects in a loop. | They see the path Umbraco expects. The API documents load under `/umbraco/swagger` on Umbraco 17 and `/umbraco/openapi` on Umbraco 18. |
+| Basic-auth routes already contain the prefix, so MVC adds it again to form actions and redirects. | Forms and redirects contain the prefix once. |
+| Backoffice images, fonts, stylesheets and workers load from the host root: the header logo, the sign-in view's logos after sign-out, the error and installer illustration, Monaco's icon font and workers, Tiptap's stylesheet, and the dark and high-contrast themes. | They load from the backoffice asset root under the prefix. |
+| The block grid's default and custom layout stylesheets and block thumbnails resolve against the host root. | They load under the prefix. |
+| The media upload field and preview add the server URL to URLs that already include the path. | Image previews, file links and the preview frame use the URL once. |
+| The website's preview badge ends preview at the host root, so preview stays on. | End preview reaches the management API under the prefix. |
+| A rich text stylesheet saved with the stylesheet root, such as `/css/rte.css`, gets the root twice. | Stylesheets load once, saved with or without the root. |
+| Umbraco's Page Not Found, No Content, Maintenance and Upgrading pages load fonts and backgrounds from the host root. | They load under the prefix. |
+| A fresh browser tries a token refresh before it has a refresh cookie. | It starts sign-in directly. Existing sessions renew as usual. |
 
-Under a virtual path the backoffice HTML names its path base, and the auth wrapper
-sets the app's server URL to the origin the browser loaded the page from plus that
-path. Umbraco uses the browser's origin the same way at the root. Apart from that, the
-auth wrapper receives only a session hint in the backoffice HTML: whether the
-refresh cookie was sent, or whether the browser reports that it may have withheld
-it. Umbraco's cookie is `SameSite=Strict` by default, so it is left off navigations
-that another site starts, such as a backoffice link in web mail
-(`Sec-Fetch-Site: cross-site`); those pages still run Umbraco's normal session
-restore. Browsers omit that header on plain-HTTP sites other than `localhost`, where
-cookie presence alone decides. Token values stay in HTTP-only cookies. The HTML uses
-`Cache-Control: no-store` so the hint describes the current request. Patched asset
-URLs include the package build identifier so a deployment replaces cached modules.
+At startup the package reads Umbraco's installed backoffice files, applies the entries
+in [`src/Patchsets`](../src/Patchsets/) for the site's Umbraco release in memory, and
+serves the results at the original URLs, with matching lengths and cache validators.
+The files on disk stay unchanged, so restart the site after updating Umbraco. Each
+entry names the file, the releases it applies to, the code it replaces and why;
+`BackOfficeAssetPatches.cs` explains how to read them. A Tag Helper Component adds the
+path base and a session hint to the backoffice page, and corrects basic-auth form
+actions. Tokens stay in HTTP-only cookies.
 
-Known bundles are matched by directory and filename, with `-????????` representing
-an eight-character build hash where needed. Fixed filenames remain exact matches.
-Asset URL corrections share one rewrite of quoted `/umbraco/backoffice/` paths;
-worker filenames retain the hashes supplied by Umbraco. Changes to JavaScript
-behavior remain explicit patches. Their placeholders stand for minified variable
-names, so a rebuild that only renames variables still matches. Each patch applies
-only when it finds the expected number of matches: exactly one for a behavior
-change, and one or more for a URL rewrite. Compatibility tests check every registered
-bundle and search pattern against the installed Umbraco assets, including bundles
-the browser scenarios do not load. They also check, through Umbraco's source maps,
-that each change hits the line of Umbraco's TypeScript it names, and that every
-patched script still parses. To review every change, read the files in
-[`src/Patchsets`](../src/Patchsets/): `BackOfficeAssetPatches.cs` explains how to read
-an entry, and the other files list each patched file with the Umbraco releases it
-applies to, the code it finds, the code that replaces it, and a note on why.
+## Hosting requirements
 
-At startup, a file provider reads those installed assets and prepares patched
-copies in memory. Umbraco's static-file middleware serves them at their original
-URLs, with lengths and cache validators for the patched content. A patched file's
-`Last-Modified` is the later of the Umbraco file's time and the time of the commit
-the package was built from, so its validators agree across restarts and servers.
-Patches preserve generated line numbers, but replacements shift columns on edited
-lines. Umbraco's original source maps are therefore approximate on those lines in
-the browser's developer tools. The original files stay unchanged. Restart
-the site after changing an upstream asset or patch.
+The package supports the Umbraco releases in the
+[supported-versions table](../README.md#supported-versions), on .NET 10. Restore stops
+with error NU1107 outside the package's dependency range; a site that references
+`Umbraco.Cms.Web.Common` or `Umbraco.Cms.StaticAssets` directly gets warning NU1608
+instead. On a release the table does not list, the startup log and the health check
+report it, and the startup log names each patch that no longer applies.
 
-A Tag Helper Component applies the HTML corrections while Razor renders the body
-of Umbraco's backoffice and two basic-auth views. It adds the app's URL attributes
-and session hint and corrects basic-auth form actions. Other views are untouched.
-The package does not replace response streams or alter `Accept-Encoding`.
-The login view's existing `asp-append-version` versions the patched script bytes;
-no additional query parameter is needed.
+- **The prefix must reach the site.** Requests arrive with the prefix in the path, or
+  with the path base already set: by IIS for a child application, or by
+  `UseForwardedHeaders` with `X-Forwarded-Prefix` behind a proxy that strips it. Route
+  only the prefix to the site, because Kestrel also answers unprefixed URLs.
+- **IIS child applications:** set `ApplicationVirtualPath` to the application's path.
+- **Absolute URLs built on the server**, such as email links, follow Umbraco's usual
+  rules. Behind a proxy or load balancer, set `UmbracoApplicationUrl`, or apply
+  `X-Forwarded-Proto` and `X-Forwarded-Host` with `UseForwardedHeaders` before
+  `UseUmbraco()`.
+- **Response compression:** register `UseResponseCompression()` before `UseUmbraco()`.
+  Patched files compress like any other.
+- **Several Umbraco sites on one host** share `Path=/` cookies, so give each its own
+  `Umbraco:CMS:Security:BackOfficeTokenCookie:SiteName` and
+  `Umbraco:CMS:Security:AuthCookieName`.
+- **Third-party plugins** build their own URLs. The package prefixes their import-map
+  entries, and the plugins handle the rest.
 
-## Hosting and compatibility
+## Health check
 
-Use the package with **Umbraco <!-- umbraco-releases -->17.5.0 to 18.3.1<!-- /umbraco-releases --> on .NET 10**. It depends on that
-range of `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`. Every release listed
-in `UmbracoReleases` in `Directory.Build.props` passed the fast and browser tests
-when it was added, and again after any change that might affect it. The package
-applies the patches for the site's own Umbraco release. Restore normally fails with a
-version conflict (NU1107) outside the range, so upgrade the package when you upgrade
-Umbraco beyond the range. A site that references those two packages directly at
-another version gets only a NuGet warning (NU1608). The package checks its exact
-validated release list at startup and in the health check, warning for any unlisted
-version or prerelease. Asset preparation also logs warnings for missing or ambiguous
-bundles, and for each patch that it skips
-because its pattern no longer matches the expected number of times.
+Settings → Health Check → Configuration → **Application virtual path** reports:
 
-An Umbraco release published after a package release can fall inside its range, such
-as a later Umbraco 17 release. Restore accepts it before it has been tested, but the
-startup and health-check warnings still report it as unsupported. The package attempts
-the patches whose version bounds include that release. If Umbraco changed those files,
-asset preparation reports each patch that no longer applies.
-
-Requests must reach the site with the prefix still in the path, or with the path
-base already set: by IIS for a child application, or by
-`UseForwardedHeaders` with `X-Forwarded-Prefix` behind a proxy that strips it. In
-an IIS child application, set `ApplicationVirtualPath` to that application's path.
-Kestrel uses the same setting to establish the path base. Route only the prefix to
-the site; Kestrel otherwise also answers unprefixed URLs.
-
-An existing host-supplied path base is preserved, including when a content slug
-repeats the application prefix. Patched static files and rendered HTML use normal
-ASP.NET Core response compression. Register `UseResponseCompression()` before the
-static-file and MVC handlers, normally before `UseUmbraco()`. The package has no
-special compression-ordering requirement.
-
-The backoffice's server URL comes from the browser, as at the root, so the backoffice
-does not depend on the `Host` header or on forwarded headers. Absolute URLs that
-Umbraco builds on the server, such as the links in emails, follow Umbraco's usual
-rules: behind a reverse proxy or load balancer, set `UmbracoApplicationUrl`, or apply
-`X-Forwarded-Proto` and `X-Forwarded-Host` with `UseForwardedHeaders` before `UseUmbraco`.
-
-The package adds an **Application virtual path** check to the backoffice, under
-Settings → Health Check → Configuration. The check reports:
-
-- whether the package matches the site's Umbraco version;
+- whether the package supports the site's Umbraco release;
 - the path base that requests arrive with;
-- every change that could not be applied;
-- requests that reached the site outside the virtual path, which Kestrel also answers.
+- each change that could not be applied;
+- requests that reached the site outside the virtual path.
 
-The startup log carries the same warnings.
+The startup log carries the same warnings. Umbraco's own security-header checks request
+the host root, so their results describe the host rather than the site.
 
-Several Umbraco sites on one host, such as sibling IIS applications, share
-`Path=/` cookies. Give each site its own
-`Umbraco:CMS:Security:BackOfficeTokenCookie:SiteName` and `Umbraco:CMS:Security:AuthCookieName`.
+## Testing
 
-Third-party plugins remain responsible for URLs they construct themselves. The
-package prefixes their import-map entries, but does not rewrite arbitrary plugin
-code. Umbraco's security-header health checks request the host root rather than
-the application path; that is outside the package's scope.
+Every supported release passes the quick tests and five browser cases. The quick tests
+check each patch against the installed Umbraco files and Umbraco's source maps, scan
+Umbraco's scripts for URLs that could lose the virtual path, and test the middleware,
+file provider, Tag Helper and health check. The browser cases run Chromium against
+disposable starter-kit sites:
 
-## Browser validation
+| Case | Site | Checks |
+|---|---|---|
+| `full` | HTTPS at `/SomeTestPath/Nested`, media outside `wwwroot`, debug mode off | The whole journey: front end, emails, error page, contact form, sign-in, health check, patched modules and caching, session restore, editors and themes, block grid, publishing and preview, media and crops, the Delivery API and sign-out |
+| `iis` | HTTP at `/SomeTestPath`, path base set before the package, no WebSockets | Sign-in, session restore, server events over SSE, a slug that repeats the prefix, preview over SSE, the Delivery API and sign-out |
+| `proxy` | HTTPS at `/SomeTestPath` behind a proxy that forwards prefix, host and scheme | Front end, sign-in, the public server URL, session restore, cross-site cookies and sign-out |
+| `proxy-root` | The same proxy at the site root | The same checks, with every URL on the public host |
+| `basic-auth` | HTTP at `/SomeTestPath` with basic authentication | The two-factor redirect, a failed and a successful login, and the front end |
 
-The Playwright suite builds disposable sites the way `dotnet new umbraco` does with
-the starter kit: SQLite, Kestrel, unattended install and standard startup. It uses
-five sites: one comprehensive journey through the affected features and four
-focused hosting checks. Each site has its own database because these settings
-affect startup, authentication and URL generation.
-
-| Case | Configuration and coverage |
-|---|---|
-| `full` | Kestrel at `/SomeTestPath/Nested`, HTTPS, media outside `wwwroot` and `Hosting:Debug=false`. Runs the journey below, including secure cookies and cross-site session restoration. |
-| `iis` | Plain HTTP at `/SomeTestPath`, with the path base supplied before the package and WebSockets disabled. Checks OpenAPI, sign-in, session restore, server-event SSE, a content slug repeating the prefix, draft preview over SSE, Delivery API URLs and sign-out. |
-| `proxy` | HTTPS at `/SomeTestPath`, forwarded prefix, host and scheme. Checks the home page and images, sign-in, the public server URL, session restore, cross-site cookies and sign-out. |
-| `proxy-root` | The same focused proxy checks at the site root, guarding against the internal backend host leaking into URLs. |
-| `basic-auth` | Plain HTTP subdirectory with basic authentication enabled. Checks the two-factor redirect, an invalid password followed by a successful login, and the front end. |
-
-The `full` case:
-
-- request the OpenAPI documents;
-- visit the home page and one nested blog page, checking their paths and images;
-- request a password reset and follow the emailed link to the new-password form;
-- load Umbraco's built-in error page with its fonts and background, and submit the contact form to check that its action and redirect keep the virtual path;
-- sign in to the backoffice and check the dashboard and the header logo;
-- run the health check as the backoffice dashboard does, and expect every result to succeed;
-- open the backoffice using a differently cased prefix, import every patched JavaScript module, and check real static-file 304 responses;
-- reload and check that the session is restored through a token refresh;
-- invite an editor and follow the emailed link to the password form;
-- edit rich text with configured stylesheets saved with and without the stylesheet root, ask the JSON worker to validate invalid code, open the editor's Find widget and check its icon font, and load dark and high-contrast themes;
-- open a block grid with its default stylesheet, persist a custom stylesheet and block thumbnails on its data type, and check both stylesheet URLs, the thumbnails in the block catalogue and the data type's block cards, and the setting's default-stylesheet link;
-- create a page, publish it and open it on the front end;
-- preview unpublished changes, save a second draft, verify that the open preview updates while the public page remains unchanged, then end preview from the website's preview badge;
-- upload an image, check every link to it in the backoffice, then open it and a signed resized version returned by the imaging API;
-- select that image through the home page's media picker, publish it, and verify the rendered original and signed crop;
-- check the Delivery API's route and media URLs;
-- sign out, verify the prefixed logout redirect, and reload to check the session stays signed out.
-
-The other cases reuse only the steps relevant to their hosting risks; they do not
-repeat the nested-page, email, editor, stylesheet or media-upload journey.
-File-provider tests check the prepared bytes, lengths, HEAD requests, conditional
-responses and byte ranges through the real static-file middleware. Component tests
-use the real body Tag Helper to check view scoping, URL attributes, basic-auth forms,
-session hints and custom cookie settings. The full browser journey also verifies
-that the login script's version matches the served bytes. Middleware tests cover
-normal response compression, request-path restoration and startup version warnings;
-file-provider tests verify that missing patches are reported during startup only.
-URL tests cover prefix boundaries, signed queries and fragments, import maps and
-OAuth callbacks without starting a site. A source scan reads Umbraco's TypeScript from
-the shipped source maps and requires every URL construction that could lose the virtual
-path to be patched or reviewed. The IIS-style case observes an actual
-EventSource open event for both the backoffice server-events hub and the preview
-hub. Each site has image signing enabled with a fresh test key.
-
-Browser console errors, uncaught JavaScript exceptions, failed requests and HTTP
-errors fail the test, as do server errors and package warnings. So does any
-request to the site's host outside the virtual path. The test checks each request
-as the browser sends it, so a request that the page cancels before it completes
-still counts. Two expected
-responses during sign-out are recorded separately, and both also occur on a root
-site. Without WebSockets, Umbraco revokes the session before SignalR sends its SSE
-close message, causing a 401 on the server-event hub's POST. A management API GET
-that is still loading when the session ends, such as the content tree's, also gets a
-401; a request outside the virtual path would get a 404 instead. Three Umbraco bugs
-that have nothing to do with the virtual path are ignored on the releases that have
-them: the tags input of Umbraco 17.5 and 18.0 can throw while it re-renders, which
-17.6 and 18.1 fixed; in every supported release a document workspace controller
-can read a variant's language before the languages have loaded; and the sign-in page
-gives up waiting for its translations after two seconds, which a busy machine can
-exceed. A translation request that fails outright still fails the test. In the site's
-log, one Examine error is ignored: the search index can be locked when Examine first
-creates it after the site restarts. The starter kit's external
-dependencies receive deterministic local responses; unexpected external requests
-fail. Browser routing disables its HTTP
-cache, so conditional-response behavior is tested separately with an HTTP client.
-The automated suite runs over HTTP and HTTPS on Kestrel. On 14 November 2026,
-the browser checks also passed against a published IIS child application on
-Windows Server 2022 and .NET 10.0.14: `/SomeTestPath`, in-process hosting (`w3wp`),
-external media storage, image signing enabled and WebSockets disabled. This included
-the repeated content slug, updating draft preview, signed image resizing and a
-separate basic-authentication run. That was a deployment check; the automated
-IIS-style case still uses Kestrel.
-
-See [Developing and releasing](DEVELOPING.md) to run the suite and view the saved
-traces, screenshots and server logs.
+A case fails on browser console errors, uncaught exceptions, failed requests, HTTP
+errors, server errors, package warnings and any request outside the virtual path.
+`SiteEndToEndTests.cs` lists the few Umbraco errors it ignores, which have nothing to do
+with the virtual path. On 14 November 2026 the browser checks also passed against a
+published IIS child application: Windows Server 2022, .NET 10.0.14, `/SomeTestPath`,
+in-process hosting, external media storage, image signing and no WebSockets.
+[Developing](DEVELOPING.md) shows how to run the tests.

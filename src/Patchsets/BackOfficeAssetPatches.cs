@@ -49,6 +49,11 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 /// base URL of Umbraco's own HTTP client. Replacements keep every line break, so Umbraco's source maps still point at
 /// the right lines.
 /// </para>
+/// <para>
+/// Each entry starts with a comment that says what it fixes. Code is written as raw string literals that read as they
+/// do in Umbraco's file, apart from placeholders, and each property sits on its own line. Keep new entries in the same
+/// layout, so a reviewer can compare each one with Umbraco's file.
+/// </para>
 /// </remarks>
 internal static class BackOfficeAssetPatches
 {

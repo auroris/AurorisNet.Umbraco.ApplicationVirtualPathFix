@@ -26,17 +26,21 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
     [Fact]
     public async Task Prepared_assets_have_their_own_bytes_and_metadata_and_leave_originals_intact()
     {
+        var paths = assets.PatchedPaths();
+        Assert.Equal(UmbracoUnderTest.Patches.Select(patch => patch.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count(), paths.Length);
+        // Capture the original bytes before either provider prepares its patched copies.
+        var originals = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+            originals[path] = await ReadAsync(assets.Files.GetFileInfo(path));
         var provider = CreateProvider();
         // Another server, or the same one after a restart, must offer the same cache validators.
         var restarted = CreateProvider();
         // The build records the time of the commit the package was built from.
         Assert.NotEqual(DateTimeOffset.MinValue, BackOfficeAssetFileProvider.SourceTimestamp);
-        var paths = assets.PatchedPaths();
-        Assert.Equal(UmbracoUnderTest.Patches.Select(patch => patch.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count(), paths.Length);
         foreach (var path in paths)
         {
             var original = assets.Files.GetFileInfo(path);
-            var originalBytes = await ReadAsync(original);
+            var originalBytes = originals[path];
             var file = provider.GetFileInfo(path);
             var bytes = await ReadAsync(file);
             Assert.NotEqual(originalBytes, bytes);

@@ -12,6 +12,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
 {
     private const string AssetsPath = "/portal/umbraco/backoffice/cache-hash";
     private static readonly PatchContext Context = new("/portal", "/portal/umbraco", AssetsPath);
+    private static readonly AssetPatch AssetUrls = new() { Path = "/test.js", MovesAssetUrls = true };
 
     /// <summary>The entries that apply to the Umbraco release under test, one test case each, named as in test output.</summary>
     public static TheoryData<string> Patches => new(UmbracoUnderTest.Patches.Select(patch => patch.ToString()));
@@ -124,7 +125,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
             const api = "/umbraco/management/api/v1/media";
             const external = "https://cdn.example.test/umbraco/backoffice/assets/logo.svg";
             """;
-        Assert.Equal(expected, AssetPatcher.Patch(Manifests, source, Context, Unapplied));
+        Assert.Equal(expected, AssetPatcher.Patch(AssetUrls, source, Context, Unapplied));
     }
 
     /// <summary>
@@ -135,7 +136,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     public void Asset_root_is_encoded_for_javascript_and_html_attributes()
     {
         const string source = """const image = html`<img src="/umbraco/backoffice/assets/logo.svg">`;""";
-        var patched = AssetPatcher.Patch(Manifests, source, Context with { AssetsPath = "/a'b&c`d\"e/umbraco/backoffice/hash" }, Unapplied);
+        var patched = AssetPatcher.Patch(AssetUrls, source, Context with { AssetsPath = "/a'b&c`d\"e/umbraco/backoffice/hash" }, Unapplied);
         Assert.Equal("""const image = html`<img src="/a%27b%26c%60d%22e/umbraco/backoffice/hash/assets/logo.svg">`;""", patched);
     }
 
@@ -237,21 +238,6 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     }
 
     /// <summary>
-    /// Checks that the patches for the website's <c>nonodes.css</c> and <c>preview.js</c> apply to the installed files:
-    /// the file at <paramref name="path"/> loses <paramref name="removed"/> and gains <paramref name="added"/>.
-    /// </summary>
-    [Theory]
-    [InlineData("/umbraco/website/nonodes.css", "url(/umbraco/website/", "url(")]
-    [InlineData("/umbraco/website/preview.js", "fetch(`/umbraco/", "fetch(`${this.getAttribute(\"path\") ?? \"/umbraco\"}/management/api/v1/preview`")]
-    public async Task Website_asset_patches_match_the_installed_files(string path, string removed, string added)
-    {
-        var source = await ReadAsync(assets.Files.GetFileInfo(path));
-        var patched = AssetPatcher.Patch(AssetPatcher.For(path, UmbracoUnderTest.Release), source, Context, Unapplied);
-        Assert.DoesNotContain(removed, patched, StringComparison.Ordinal);
-        Assert.Contains(added, patched, StringComparison.Ordinal);
-    }
-
-    /// <summary>
     /// Checks that when an Umbraco file no longer contains the code its patch expects, the patch reports each change it
     /// cannot apply: one report per edit, plus one for moving asset URLs.
     /// </summary>
@@ -267,8 +253,6 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
             Assert.Equal(patch.Edits.Length + (patch.MovesAssetUrls ? 1 : 0), failures.Count);
         }
     }
-
-    private static AssetPatch Manifests => AssetPatcher.For("/umbraco/backoffice/packages/core/manifests.js", UmbracoUnderTest.Release).Single();
 
     /// <summary>Fails the test with the reason a change could not be applied.</summary>
     private static void Unapplied(string resource, string reason) => Assert.Fail($"Umbraco's {resource} {reason}");

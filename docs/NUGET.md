@@ -6,29 +6,27 @@ session renewal stay under the site's application path.
 
 ## What it does
 
-- **Keeps sign-in inside the application path.** Login, management API calls,
-  OAuth callbacks and password-reset and invitation links use the configured prefix.
-- **Loads backoffice and package assets.** Import maps, cache-busted scripts,
-  stylesheets and the Umbraco logo resolve under the application path.
-- **Serves media under the prefix**, including media stored outside `wwwroot` or in
-  a provider such as Azure Blob Storage, with ImageSharp crops and resizes.
-- **Restores existing sessions.** Umbraco renews its token when a session may exist.
-  A fresh browser starts sign-in directly, avoiding the initial token-refresh errors.
-  This also applies to sites hosted at the root.
-- **Reports its status in the backoffice.** A health check under Settings → Health
-  Check shows whether every fix applied and how requests reach the site.
+- **Sign-in stays inside the path.** Login, management API calls, OAuth callbacks, and
+  password-reset and invitation links use the prefix.
+- **Backoffice assets load.** Import maps, scripts, stylesheets and the logo resolve
+  under the path.
+- **Media is served under the prefix**, including media outside `wwwroot` or in a
+  provider such as Azure Blob Storage, with ImageSharp crops and resizes.
+- **Sessions restore cleanly.** A fresh browser starts sign-in directly, avoiding
+  Umbraco's initial token-refresh errors. This also helps sites at the root.
+- **A health check reports the status** under Settings → Health Check.
 
 ## Quick start
 
-Add the package to a website running Umbraco 17.5.0 to 18.3.1. Package versions start
-with the newest Umbraco release they support, so the floating version `18.*` picks up
-the newest release on Umbraco 17 and 18 alike:
+Add the package to a website running Umbraco 18.0.0 to 18.3.1 or 17.5.0 to 17.8.1.
+Reference your site's Umbraco major version, so NuGet installs the newest package for it:
 
 ```xml
 <PackageReference Include="AurorisNet.Umbraco.ApplicationVirtualPathFix" Version="18.*" />
 ```
 
-Set the site's application path in `appsettings.json`:
+On Umbraco 17, use `Version="17.*"`. Then set the site's application path in
+`appsettings.json`:
 
 ```json
 {
@@ -42,26 +40,21 @@ Set the site's application path in `appsettings.json`:
 }
 ```
 
-Start the website and open `/SomeTestPath/umbraco`. Standard Umbraco startup with
-`.AddComposers()` loads the package automatically. Sites hosted at the root can leave
-`ApplicationVirtualPath` unset.
+Start the website and open `/SomeTestPath/umbraco`.
 
 ## Versions
 
-The first three numbers of the package version are the newest Umbraco release the
-package supports, and the fourth counts our releases for it. The package's
-dependencies show the oldest supported release. Some fixes patch the JavaScript that
-Umbraco serves, so support is limited to the releases its tests have passed. NuGet's
-dependency range can admit untested releases between its bounds; startup and the
-health check warn for any version absent from the validated release list. Outside
-the range, restore normally fails with a version conflict, unless direct dependency
-references override it with a NuGet warning. When you upgrade Umbraco to an unlisted
-release, upgrade the package too.
+A package version is the newest Umbraco release it supports, followed by our release
+count: 18.3.1.2 supports every Umbraco 18 release up to 18.3.1, and 17.8.1.1 supports
+Umbraco 17.5.0 up to 17.8.1. NuGet's dependency range spans the oldest and newest
+supported releases. Check the
+[supported versions](https://github.com/auroris/UmbracoApplicationVirtualPathFix#supported-versions)
+to see whether your Umbraco release is tested and supported, and upgrade the package
+when you upgrade Umbraco.
 
 ## Documentation
 
-- [Fixes, hosting requirements and compatibility](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/main/docs/FIXES.md)
-- [Supported Umbraco versions](https://github.com/auroris/UmbracoApplicationVirtualPathFix#supported-versions)
+- [Fixes and compatibility](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/main/docs/FIXES.md)
 - [Version numbering and releases](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/main/docs/VERSIONING.md)
 - [Issue tracker](https://github.com/auroris/UmbracoApplicationVirtualPathFix/issues)
 

@@ -19,54 +19,45 @@
 ## What it does
 
 `AurorisNet.Umbraco.ApplicationVirtualPathFix` lets a standard Umbraco site serve its
-backoffice under an application virtual path. Installing the package registers its
-fixes through Umbraco's composer and middleware pipeline.
+backoffice under an application virtual path. It registers itself through Umbraco's
+composers.
 
-- **Keep sign-in inside the application path.** Login, management API calls,
-  OAuth callbacks and password-reset and invitation links use the configured prefix.
-- **Load backoffice and package assets.** Import maps, cache-busted scripts,
-  stylesheets and the Umbraco logo resolve under the application path.
-- **Serve media under the prefix**, including media stored outside `wwwroot` or in
-  a provider such as Azure Blob Storage, with ImageSharp crops and resizes.
-- **Restore an existing session.** Umbraco renews its token when a session may
-  exist. A fresh browser starts sign-in directly, avoiding the initial
-  token-refresh errors. This fix also applies to sites hosted at the root.
-- **Report its status in the backoffice.** A health check under Settings → Health
-  Check shows whether every fix applied and how requests reach the site.
+- **Sign-in stays inside the path.** Login, management API calls, OAuth callbacks, and
+  password-reset and invitation links use the prefix.
+- **Backoffice assets load.** Import maps, scripts, stylesheets and the logo resolve
+  under the path.
+- **Media is served under the prefix**, including media outside `wwwroot` or in a
+  provider such as Azure Blob Storage, with ImageSharp crops and resizes.
+- **Sessions restore cleanly.** A fresh browser starts sign-in directly, avoiding
+  Umbraco's initial token-refresh errors. This also helps sites at the root.
+- **A health check reports the status** under Settings → Health Check.
 
-Some fixes modify the JavaScript that Umbraco serves, so each package release
-supports the Umbraco releases that its tests have passed. See
-[Fixes and compatibility](docs/FIXES.md) for the affected behavior, hosting
-requirements and validation scope.
+Some fixes patch the JavaScript that Umbraco serves, so each package version supports
+the Umbraco releases its tests have passed. [Fixes and compatibility](docs/FIXES.md)
+describes each fix and the hosting requirements.
 
 ## Supported versions
 
-| Package release | Umbraco | Runtime |
-|---|---|---|
-| 18.3.1.2 and later | <!-- umbraco-releases -->17.5.0 to 18.3.1<!-- /umbraco-releases --> | .NET 10 |
-| [18.3.1.1](https://www.nuget.org/packages/AurorisNet.Umbraco.ApplicationVirtualPathFix/18.3.1.1) | 18.3.1 | .NET 10 |
+| Umbraco | Tested and supported releases | Package versions | Runtime |
+|---|---|---|---|
+| 18 | <!-- umbraco-releases 18 -->18.0.0 to 18.3.1<!-- /umbraco-releases --> | `18.*` | .NET 10 |
+| 17 | <!-- umbraco-releases 17 -->17.5.0 to 17.8.1<!-- /umbraco-releases --> | `17.*` | .NET 10 |
 
-The exact validated releases are listed in
-[`UmbracoReleases`](Directory.Build.props). NuGet's dependency range spans the oldest
-and newest of these, so it can also admit untested releases between them. The package
-warns at startup and in the health check for any unlisted version. Outside the range,
-restore normally fails with a version conflict; direct dependency references can
-override it with a NuGet warning. The source of every release from 18.3.1.2 on is on
-`main`; the
-[`umbraco/18.3.1`](https://github.com/auroris/UmbracoApplicationVirtualPathFix/tree/umbraco/18.3.1)
-branch holds the source of 18.3.1.1.
+[`UmbracoReleases`](Directory.Build.props) lists each tested release. NuGet's
+dependency range spans the oldest and newest of these. Check this table to see whether
+your Umbraco release is tested and supported.
 
 ## Quick start
 
-Add the package to a website running Umbraco <!-- umbraco-releases -->17.5.0 to 18.3.1<!-- /umbraco-releases -->. Package versions start
-with the newest Umbraco release they support, so the floating version `18.*` picks up
-the newest release on Umbraco 17 and 18 alike:
+Add the package to a website running a [supported Umbraco release](#supported-versions).
+Reference your site's Umbraco major version, so NuGet installs the newest package for it:
 
 ```xml
 <PackageReference Include="AurorisNet.Umbraco.ApplicationVirtualPathFix" Version="18.*" />
 ```
 
-Set the site's application path in `appsettings.json`:
+On Umbraco 17, use `Version="17.*"`. Then set the site's application path in
+`appsettings.json`:
 
 ```json
 {
@@ -80,44 +71,33 @@ Set the site's application path in `appsettings.json`:
 }
 ```
 
-Start the website and open `/SomeTestPath/umbraco`. Standard Umbraco startup with
-`.AddComposers()` loads the package automatically. Kestrel applies the prefix as
-`Request.PathBase`; an existing path base supplied by IIS is preserved. For an
-IIS child application, match the setting to its application path. Sites hosted
-at the root can leave `ApplicationVirtualPath` unset.
+Start the website and open `/SomeTestPath/umbraco`. For an IIS child application,
+set `ApplicationVirtualPath` to the application's path.
 
 ## Version numbering
 
-Package versions use **`<newest supported Umbraco release>.<release count>`**. The
-first three numbers are the newest Umbraco release the package supports, and its
-dependencies show the oldest. The fourth number counts our releases for that Umbraco
-release, starting at 1.
+A package version is **`<newest supported Umbraco release>.<release count>`**. Version
+`18.3.1.2` supports every Umbraco 18 release up to 18.3.1, and it is our second release
+for 18.3.1.
 
-| Package version | Meaning |
-|---|---|
-| `18.3.1.1` | Our first release with Umbraco 18.3.1 as the newest supported release. It supports only 18.3.1. |
-| `18.3.1.2` | Our second release with 18.3.1 as the newest supported release. It supports 17.5.0 to 18.3.1. |
-| `18.3.2.1` | Our first release that adds a newer Umbraco release, such as 18.3.2. The count starts again. |
+| Package version | Supports | Release count |
+|---|---|---|
+| `18.3.1.2` | Every Umbraco 18 release up to 18.3.1 | Our second release for 18.3.1 |
+| `17.8.1.1` | Umbraco 17.5.0 up to 17.8.1 | Our first release for 17.8.1 |
+| `18.3.2.1` | Every Umbraco 18 release up to 18.3.2 | Our first release for 18.3.2, after adding it |
 
-The Release workflow chooses the next release count and creates a tag such as
-`v18.3.1.2`. See [Version numbering and releases](docs/VERSIONING.md) for how
-releases are tested, numbered and published.
+Each release publishes one version for each supported Umbraco major version, built from
+the same source: the release that publishes `18.3.1.2` also publishes `17.8.1.1`.
+[Version numbering and releases](docs/VERSIONING.md) explains the counts and how a
+release is published.
 
 ## Documentation
 
 | Guide | Read it for |
 |---|---|
-| [Fixes and compatibility](docs/FIXES.md) | The Umbraco behavior each fix changes, hosting requirements and browser-test coverage. |
-| [Developing and releasing](docs/DEVELOPING.md) | Building the package, testing every supported Umbraco release, and packing and publishing a release. |
-| [Version numbering and releases](docs/VERSIONING.md) | How package versions relate to Umbraco releases, and how the Release workflow numbers and publishes them. |
-
-## Developing
-
-Open `UmbracoApplicationVirtualPathFix.slnx` with the .NET 10 SDK installed. The
-solution contains the package and its standalone Umbraco browser tests. Build and
-test commands are in [Developing and releasing](docs/DEVELOPING.md). The package's
-nuget.org page shows [docs/NUGET.md](docs/NUGET.md) rather than this README, because
-nuget.org renders neither HTML nor relative links.
+| [Fixes and compatibility](docs/FIXES.md) | What each fix changes, hosting requirements and test coverage. |
+| [Developing](docs/DEVELOPING.md) | Building, testing and adding Umbraco releases. |
+| [Version numbering and releases](docs/VERSIONING.md) | How versions are numbered and how a release is published. |
 
 ## License
 

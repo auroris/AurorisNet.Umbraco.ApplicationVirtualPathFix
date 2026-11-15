@@ -106,3 +106,55 @@ Describe 'Release revision selection' {
         { & $script -BranchName 'main' -Commit $commit } | Should -Throw '*exact commit*'
     }
 }
+
+Describe 'One package per Umbraco major version' {
+    BeforeEach {
+        $fixture = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path "$fixture/.github/scripts" -Force | Out-Null
+        Copy-Item -LiteralPath $sourceScript -Destination "$fixture/.github/scripts/Get-ReleaseVersion.ps1"
+        Set-Content -LiteralPath "$fixture/Directory.Build.props" ('<Project><PropertyGroup>' +
+            '<UmbracoReleases>17.5.0;17.8.0;17.8.1;18.0.0;18.3.1</UmbracoReleases>' +
+            '<UmbracoMaximumVersion>18.3.1</UmbracoMaximumVersion></PropertyGroup></Project>')
+        Push-Location $fixture
+        Invoke-Git init -b main
+        Invoke-Git config user.name 'Release fixture'
+        Invoke-Git config user.email 'fixture@example.test'
+        Invoke-Git config commit.gpgsign false
+        $commit = New-Commit
+        Invoke-Git update-ref refs/remotes/origin/main $commit
+        $script = "$fixture/.github/scripts/Get-ReleaseVersion.ps1"
+    }
+
+    AfterEach { Pop-Location }
+
+    It 'numbers each package after its major version''s newest listed release, newest major version first' {
+        $releases = @(& $script -BranchName 'main' -Commit $commit)
+        $releases.Umbraco | Should -Be @('18.3.1', '17.8.1')
+        $releases.Version | Should -Be @('18.3.1.1', '17.8.1.1')
+        $releases.Tag | Should -Be @('v18.3.1.1', 'v17.8.1.1')
+    }
+
+    It 'counts each major version''s releases separately' {
+        Invoke-Git tag v18.3.1.1
+        Invoke-Git tag v18.3.1.2
+        Invoke-Git tag v17.8.0.3
+        $commit = New-Commit
+        Invoke-Git update-ref refs/remotes/origin/main $commit
+        (& $script -BranchName 'main' -Commit $commit).Version | Should -Be @('18.3.1.3', '17.8.1.1')
+    }
+
+    It 'reuses every tag reserved at the commit when retrying after a newer release' {
+        Invoke-Git tag v18.3.1.2
+        Invoke-Git tag v17.8.1.1
+        $newer = New-Commit
+        Invoke-Git update-ref refs/remotes/origin/main $newer
+        Invoke-Git checkout --detach $commit
+        (& $script -BranchName 'main' -Commit $commit).Version | Should -Be @('18.3.1.2', '17.8.1.1')
+    }
+
+    It 'rejects a listed release that is not a release number' {
+        Set-Content -LiteralPath "$fixture/Directory.Build.props" ('<Project><PropertyGroup><UmbracoReleases>17.8;18.3.1</UmbracoReleases>' +
+            '<UmbracoMaximumVersion>18.3.1</UmbracoMaximumVersion></PropertyGroup></Project>')
+        { & $script -BranchName 'main' -Commit $commit } | Should -Throw '*UmbracoReleases lists 17.8*'
+    }
+}
