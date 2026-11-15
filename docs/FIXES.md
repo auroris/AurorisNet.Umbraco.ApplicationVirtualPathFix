@@ -1,4 +1,4 @@
-# Fixes for Umbraco 18.3.1
+# Fixes for Umbraco 18.2 and 18.3
 
 The package keeps the backoffice's URLs inside the application virtual path
 configured by `Umbraco:CMS:Hosting:ApplicationVirtualPath`. It registers through
@@ -7,7 +7,7 @@ ahead of Umbraco's own filters, to apply the path base and its middleware.
 
 ## Corrected behavior
 
-| Umbraco 18.3.1 behavior | Result with the package |
+| Umbraco behavior | Result with the package |
 |---|---|
 | The backoffice asset rewrite expects the virtual path in `Request.Path`, after the host has moved it into `Request.PathBase`. | Cache-busted asset requests reach Umbraco's script and stylesheet handlers. |
 | Import maps contain root-absolute core and package URLs. | Root-absolute imports and scopes carry the application prefix, and Umbraco can add its asset hash. |
@@ -79,14 +79,16 @@ no additional query parameter is needed.
 
 ## Hosting and compatibility
 
-Use this branch's package with **Umbraco 18.3.1 on .NET 10**. The package depends
-on exactly `18.3.1` of `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`, so
-upgrading a site's Umbraco without the matching package release makes restore fail
-with a version conflict (NU1107). Upgrade both together. A site that references
-those two packages directly at another version gets only a NuGet warning (NU1608);
-the package then logs a warning at startup. Asset preparation also logs warnings
-for missing or ambiguous bundles, and for each patch that it skips because its pattern
-no longer matches the expected number of times.
+Use the package with **Umbraco 18.2.0 to 18.3.1 on .NET 10**. It depends on that
+range of `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`, and every release
+in it passes the fast and browser tests before a package is published. The package
+applies the patches for the site's own Umbraco release. Restore fails with a version
+conflict (NU1107) on any other release, so upgrade the package when you upgrade
+Umbraco beyond the range. A site that references those two packages directly at
+another version gets only a NuGet warning (NU1608); the package then logs a warning
+at startup, and the health check reports the unsupported version. Asset preparation
+also logs warnings for missing or ambiguous bundles, and for each patch that it skips
+because its pattern no longer matches the expected number of times.
 
 Requests must reach the site with the prefix still in the path, or with the path
 base already set: by IIS for a child application, or by

@@ -1,15 +1,16 @@
 <#
 .SYNOPSIS
-Chooses the package version and release tag for this branch's next release.
+Chooses the package version and release tag for the next release from main.
 
 .DESCRIPTION
-Reads UmbracoVersion from Directory.Build.props and checks that the branch name matches it and that the checkout is
-the commit being released. A commit that already carries a release tag reuses that revision, so a retried release
-can finish. Any other commit must be the branch tip on origin, and it gets the revision after the highest existing
-tag, starting at 1.
+Reads UmbracoMaximumVersion, the newest Umbraco release the package supports, from Directory.Build.props, and checks
+that the release runs from main and that the checkout is the commit being released. The package version is that
+Umbraco release followed by a release count. A commit that already carries a release tag reuses that count, so a
+retried release can finish. Any other commit must be the tip of main on origin, and it gets the count after the highest
+existing tag for the same Umbraco release, starting at 1.
 
 .PARAMETER BranchName
-The branch being released, such as umbraco/18.3.1.
+The branch being released, which must be main.
 
 .PARAMETER Commit
 The full hash of the commit being released. It must match the checked-out HEAD.
@@ -24,12 +25,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 [xml] $settings = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../Directory.Build.props')
-$umbracoVersion = [string] $settings.Project.PropertyGroup.UmbracoVersion
+$umbracoVersion = [string] $settings.Project.PropertyGroup.UmbracoMaximumVersion
 if ($umbracoVersion -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
-    throw 'UmbracoVersion must contain exactly three numeric components.'
+    throw 'UmbracoMaximumVersion must contain exactly three numeric components.'
 }
-if ($BranchName -cne "umbraco/$umbracoVersion") {
-    throw "Release from the umbraco/$umbracoVersion branch. Its name must match Directory.Build.props."
+if ($BranchName -cne 'main') {
+    throw "Release from the main branch, not $BranchName."
 }
 
 $headCommit = git rev-parse HEAD

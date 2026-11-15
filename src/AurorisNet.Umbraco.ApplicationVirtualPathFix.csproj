@@ -7,8 +7,8 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <PackageId>AurorisNet.Umbraco.ApplicationVirtualPathFix</PackageId>
     <Title>Umbraco Application Virtual Path Fix</Title>
-    <!-- The release workflow supplies the revision. Local packs keep revision 0, which is never published, so they
-         cannot shadow a release in NuGet's cache. -->
+    <!-- The first three numbers are the newest supported Umbraco release, and the release workflow supplies the release
+         count. Local packs keep count 0, which is never published, so they cannot shadow a release in NuGet's cache. -->
     <Version>$(UmbracoMaximumVersion).0</Version>
     <Authors>Auroris</Authors>
     <Description>Fixes application virtual path hosting, backoffice assets, media, login and initial token refresh in Umbraco $(UmbracoMinimumVersion) to $(UmbracoMaximumVersion). Registers automatically through Umbraco startup.</Description>

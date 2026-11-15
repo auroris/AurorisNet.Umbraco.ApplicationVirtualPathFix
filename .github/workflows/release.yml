@@ -18,8 +18,9 @@ jobs:
   release:
     name: Test and publish
     runs-on: windows-latest
-    # One full browser journey and four focused hosting cases, each with its own site.
-    timeout-minutes: 45
+    # Every supported Umbraco release gets its own build, the fast tests, and one full browser journey and four focused
+    # hosting cases, each with its own site.
+    timeout-minutes: 150
     permissions:
       contents: write
       id-token: write
@@ -38,7 +39,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Choose the next revision for this Umbraco version
+      - name: Choose the next release count for the newest supported Umbraco release
         id: version
         env:
           RELEASE_BRANCH: ${{ github.ref_name }}
@@ -59,21 +60,24 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: dotnet build "$env:TEST_PROJECT" -c Release -p:Version=$env:RELEASE_VERSION
 
-      - name: Test asset compatibility and middleware
-        run: dotnet test --project "$env:TEST_PROJECT" -c Release --no-build -- --filter-not-class '*SiteEndToEndTests'
+      - name: Test asset compatibility and middleware on every supported Umbraco release
+        run: ./tests/Test-UmbracoReleases.ps1 -Configuration Release
 
       - name: Install Chromium
         run: ./tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Release/net10.0/playwright.ps1 install chromium
 
-      - name: Test affected features and hosting cases
-        run: dotnet test --project "$env:TEST_PROJECT" -c Release --no-build -- --filter-class '*SiteEndToEndTests'
+      # Two releases at a time keeps the hosted runner's timing-sensitive browser steps reliable.
+      - name: Test affected features and hosting cases on every supported Umbraco release
+        run: ./tests/Test-UmbracoReleases.ps1 -Configuration Release -Browser -Throttle 2
 
-      - name: Upload browser and server diagnostics
+      - name: Upload test logs and browser and server diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: browser-diagnostics
-          path: tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Release/net10.0/e2e-artifacts/
+          path: |
+            artifacts/umbraco-releases/*/*.log
+            artifacts/umbraco-releases/*/artifacts/bin/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/release/e2e-artifacts/
           if-no-files-found: ignore
           retention-days: 7
 

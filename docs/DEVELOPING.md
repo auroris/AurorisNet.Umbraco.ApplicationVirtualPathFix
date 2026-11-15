@@ -1,6 +1,6 @@
 # Develop and release the Umbraco 18 fixes
 
-Build this branch to produce `AurorisNet.Umbraco.ApplicationVirtualPathFix` for the
+Build the repository to produce `AurorisNet.Umbraco.ApplicationVirtualPathFix` for the
 Umbraco releases listed in `UmbracoReleases` in `Directory.Build.props`, currently
 18.2.0 to 18.3.1. The package depends on the range from `UmbracoMinimumVersion` to
 `UmbracoMaximumVersion`, so NuGet compiles it against the oldest supported release.
@@ -10,7 +10,7 @@ release with [`tests/Test-UmbracoReleases.ps1`](#test-every-supported-release).
 
 ## Build and test
 
-Install the .NET 10 SDK, check out this branch, and run these commands from the
+Install the .NET 10 SDK, check out `main`, and run these commands from the
 repository root:
 
 ```powershell
@@ -163,10 +163,11 @@ Import-Module Pester -RequiredVersion 5.7.1
 Invoke-Pester .github/scripts/Get-ReleaseVersion.Tests.ps1 -CI
 ```
 
-These tests create disposable Git repositories and cover initial and subsequent
-revisions, the assembly revision limit, tagged retries, stale commits,
-branch/checkout mismatches and malformed version properties. They do not tag or
-publish this repository.
+These tests create disposable Git repositories. They cover initial and subsequent
+release counts, counts that follow `UmbracoMaximumVersion` rather than the release
+the tests run against, the .NET assembly version limit, tagged retries, stale commits,
+releases from a branch other than `main`, checkouts that differ from the release
+commit, and malformed version properties. They do not tag or publish this repository.
 
 Clone into a short path on Windows. Playwright's package contains deeply nested
 files, and the build fails with `MSB3021` when a path exceeds 260 characters unless
@@ -195,7 +196,8 @@ releases, `-Throttle 2` to limit how many run their tests at once, and
 ### Add an Umbraco release
 
 1. Add the release to `UmbracoReleases` in `Directory.Build.props`. When it is the
-   newest, also set `UmbracoMaximumVersion` and `UmbracoVersion` to it.
+   newest, also set `UmbracoMaximumVersion` and `UmbracoVersion` to it; the next
+   package release is then numbered after it, starting at `<release>.1`.
 2. Run `pwsh tests/Test-UmbracoReleases.ps1 -Releases <release>`. The fast tests
    show which entries no longer match, and `PatchOriginTests` says whether Umbraco
    changed the code or only its minified output.
@@ -212,25 +214,31 @@ To build a package locally:
 dotnet pack src -c Release -o artifacts/packages
 ```
 
-Local builds use version `18.3.1.0`. Revision 0 is never published, so a local
-package cannot be confused with a release in NuGet's cache. The release workflow
-supplies its selected revision as the MSBuild `Version` property when building and
-packing. The assembly embeds its symbols and generated sources, and Source Link points
+Local builds use `UmbracoMaximumVersion` with a release count of 0, currently
+`18.3.1.0`. Count 0 is never published, so a local package cannot be confused with a
+release in NuGet's cache. The release workflow supplies its selected version as the
+MSBuild `Version` property when building and packing. The assembly embeds its symbols and generated sources, and Source Link points
 them at the commit on GitHub, so a site's debugger can step into the package.
 `ContinuousIntegrationBuild`, which the release workflow sets, keeps the paths in them
 deterministic.
 
-## Publish a revision
+## Publish a release
 
-Push the intended changes to `umbraco/18.3.1`, then open **Actions → Release →
-Run workflow** on GitHub and select that branch. The workflow:
+Push the intended changes to `main`, then open **Actions → Release → Run workflow**
+on GitHub and select `main`. Pushes alone never start a release. The workflow:
 
-1. Checks that the branch name matches the configured Umbraco version and
-   chooses the next `18.3.1.<revision>` from the existing release tags.
-2. Builds, runs the fast compatibility checks, then installs Chromium and runs the browser tests before packing.
+1. Checks that it runs from `main`, then chooses the next
+   `<UmbracoMaximumVersion>.<count>`, such as `18.3.1.2`, from the existing release
+   tags.
+2. Builds the package, then runs `tests/Test-UmbracoReleases.ps1` for the fast tests
+   and, after installing Chromium, for the browser tests, so every supported Umbraco
+   release passes both before packing. The browser cases run two releases at a time.
 3. Reserves a tag such as `v18.3.1.2` at the tested commit.
 4. Publishes the package to NuGet and creates a GitHub release with the package
    attached.
+
+The workflow uploads each release's test logs and browser and server diagnostics, even
+when a test fails.
 
 NuGet trusted publishing is configured for the `AurorisNet` account, GitHub
 repository `auroris/UmbracoApplicationVirtualPathFix`, workflow filename
@@ -240,19 +248,13 @@ workflow obtains a short-lived API key through `NuGet/login` using OIDC. See
 for the policy fields.
 
 Re-running a tagged commit reuses its reserved version so a partially completed
-publication can finish. A new revision is only allocated for the branch tip, so
+publication can finish. A new count is only allocated for the tip of `main`, so
 re-running an older failed run cannot publish older code under a newer version.
-Release runs on this branch are serialized to keep revision selection consistent.
-Ordinary pushes update the branch; publishing starts when a maintainer runs
-Release.
+Release runs are serialized to keep the count consistent. The
+[version-numbering reference](VERSIONING.md) explains how versions relate to the
+supported Umbraco releases.
 
-The `main` branch keeps the workflow available in GitHub's Actions interface.
-Selecting `umbraco/18.3.1` runs this branch's own copy of `release.yml`, with its
-source, scripts, tests and documentation, so keep the copies in step. The
-[version-numbering reference](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/main/docs/VERSIONING.md)
-explains the branch and tag conventions across supported Umbraco versions.
-
-The package includes the `umbraco-marketplace` tag for Marketplace discovery.
-Shared listing metadata lives on `main`. Push changes to that metadata before
-releasing this branch, then validate the published package using the
-[Marketplace listing instructions](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/main/docs/VERSIONING.md#marketplace-listing).
+The package includes the `umbraco-marketplace` tag for Marketplace discovery, and
+`umbraco-marketplace.json` holds the listing metadata. Push changes to that metadata
+before releasing, then validate the published package using the
+[Marketplace listing instructions](VERSIONING.md#marketplace-listing).
