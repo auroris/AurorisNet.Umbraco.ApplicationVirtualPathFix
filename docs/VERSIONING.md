@@ -1,67 +1,68 @@
 # Version numbering and releases
 
-Choose a package whose first three version numbers match the site's Umbraco
-version. The fourth number identifies a release of our fixes for that version.
-For example, `AurorisNet.Umbraco.ApplicationVirtualPathFix` version `18.3.1.2`
-targets Umbraco 18.3.1 and is fix revision 2.
+Choose a package release whose supported range includes the site's Umbraco release.
+The first three numbers of a package version are the newest Umbraco release it
+supports, and the fourth counts our releases for that Umbraco release. For example,
+`AurorisNet.Umbraco.ApplicationVirtualPathFix` version `18.3.1.2` is our second
+release with Umbraco 18.3.1 as its newest supported release, and it supports Umbraco
+18.2.0 to 18.3.1.
 
 ## Package versions
 
-The format is `<Umbraco major>.<Umbraco minor>.<Umbraco patch>.<fix revision>`.
+The format is `<newest supported Umbraco release>.<release count>`.
 
 | Part | Example | Controls |
 |---|---|---|
-| Umbraco version | `18.3.1` | The exact `Umbraco.Cms` dependency supported by the package. |
-| Fix revision | `2` | Which release of the fixes to install for that Umbraco version. |
+| Newest supported Umbraco release | `18.3.1` | The upper end of the package's dependency range on `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`. The lower end is the oldest supported release. |
+| Release count | `2` | Which of our releases for that Umbraco release to install. |
 
-Revisions start at `1` for each Umbraco version and advance independently. The
-sequence `18.3.1.1`, `18.3.1.2`, `18.3.1.3` represents successive releases for
-Umbraco 18.3.1. Each of those packages retains the exact `18.3.1` dependency.
+The count starts at `1` for each newest supported release. A release that adds a
+newer Umbraco release changes the first three numbers to that release and starts the
+count again: after `18.3.1.2`, a release that adds Umbraco 18.3.2 is `18.3.2.1`. A
+release can also move the lower end of the range; the package's dependencies show it.
 
-When upgrading Umbraco, select the corresponding package release as part of the
-same update. Upstream JavaScript and hosting behavior can change between
-Umbraco releases, so the package's fixes must be checked for that version.
-The [supported-version table](../README.md#supported-versions) links to the
-available source branches and their installation instructions.
+The package accepts only the Umbraco releases in its range, so restore fails with a
+version conflict (NU1107) on any other release. A floating reference such as `18.*`
+installs the newest package for Umbraco 18. If that package no longer supports the
+site's Umbraco release, restore fails; reference the last package release that
+supports it instead. The [supported-version table](../README.md#supported-versions)
+lists each range.
 
-## Branches and documentation
+## Supported releases and branches
 
-The `main` branch provides the project overview, shared documentation,
-Marketplace listing metadata and the Release workflow. Source, tests, build
-settings and implementation documentation live on `umbraco/<version>` branches,
-beginning with
-[`umbraco/18.3.1`](https://github.com/auroris/UmbracoApplicationVirtualPathFix/tree/umbraco/18.3.1).
+The `main` branch holds the source, tests, documentation, Marketplace listing metadata
+and the Release workflow. `UmbracoReleases` in `Directory.Build.props` lists the
+supported Umbraco releases, and `UmbracoMinimumVersion` and `UmbracoMaximumVersion`
+set either end of the dependency range. Every listed release passes the tests before
+a package is published, and the patch list in `src/Patchsets` names the releases each
+change applies to. The [development guide](DEVELOPING.md#add-an-umbraco-release)
+describes how to add an Umbraco release.
 
-Each version branch sets `UmbracoVersion` in `Directory.Build.props`. The package
-and its tests read that value, and the release script checks that it matches
-the branch name. That branch's README describes the applicable installation,
-behavior, requirements and validation scope.
+The [`umbraco/18.3.1`](https://github.com/auroris/UmbracoApplicationVirtualPathFix/tree/umbraco/18.3.1)
+branch holds the source of `18.3.1.1`, our first release, which supported only
+Umbraco 18.3.1. It receives no further changes.
 
-## Release revisions and tags
+## Release counts and tags
 
-Open **Actions → Release → Run workflow** and select the intended version
-branch. Keeping `release.yml` on `main` makes the workflow available in GitHub's
-Actions interface; selecting the version branch supplies its source and scripts.
+Open **Actions → Release → Run workflow** on GitHub and select `main`. Pushing to
+`main` never starts a release. The workflow reads `UmbracoMaximumVersion` and, for a
+new commit, chooses the count after the highest matching release tag. With no
+matching tags, it starts at `1`. For example, a new release after `v18.3.1.1`
+receives version `18.3.1.2`.
 
-For a new commit, the workflow chooses the next revision after the highest
-matching release tag. With no matching tags, it starts at revision `1`. For
-example, a new release after `v18.3.1.9` receives version `18.3.1.10`.
-
-The workflow builds the package, runs the browser tests and reserves the version
-tag at the tested commit before publishing. It then publishes to NuGet through
-trusted publishing and creates a GitHub release with the package attached.
-Publishing starts when a maintainer runs Release; an ordinary push updates the
-branch without starting a release.
+The workflow builds the package, runs the fast and browser tests against every
+supported Umbraco release and reserves the version tag at the tested commit before
+publishing. It then publishes to NuGet through trusted publishing and creates a
+GitHub release with the package attached.
 
 Retrying a tagged commit reuses that commit's reserved version so a partially
-completed publication can finish. A different commit receives a new revision,
-and release runs on the same branch are serialized to prevent competing
-revision selections. A reserved tag can therefore leave a gap if a release is
-abandoned; preserve that tag so another commit cannot reuse the version.
+completed publication can finish. A new count is allocated only for the tip of
+`main`, so re-running an older run cannot publish older code under a newer version,
+and release runs are serialized to prevent competing selections. A reserved tag can
+therefore leave a gap if a release is abandoned; preserve that tag so another commit
+cannot reuse the version.
 
-Follow the version branch's development guide for build commands and release
-setup. The [Umbraco 18.3.1 guide](https://github.com/auroris/UmbracoApplicationVirtualPathFix/blob/umbraco/18.3.1/docs/DEVELOPING.md)
-covers the first supported version.
+See the [development guide](DEVELOPING.md) for build commands and release setup.
 
 ## Marketplace listing
 
@@ -70,9 +71,9 @@ repository's root URL as `PackageProjectUrl`. Umbraco Marketplace uses that URL
 to find [`umbraco-marketplace.json`](../umbraco-marketplace.json) on `main`.
 The JSON supplies the Developer Tools category, free license classification,
 documentation link and issue tracker. The title, description and README come
-from the NuGet package; compatibility comes from its Umbraco dependency.
+from the NuGet package; compatibility comes from its Umbraco dependency range.
 
-Push listing metadata changes to `main` before publishing a package revision.
+Push listing metadata changes to `main` before publishing a package release.
 Changes to the NuGet tag, title or project URL require a new package release.
 After publishing, use the [Marketplace validation tools](https://marketplace.umbraco.com/validate)
 with package ID `AurorisNet.Umbraco.ApplicationVirtualPathFix` to check the

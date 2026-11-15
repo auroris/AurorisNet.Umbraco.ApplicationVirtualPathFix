@@ -1,0 +1,2 @@
+# Keep the original bytes of vendored assets, which browsers check against integrity hashes.
+tests/**/BrowserFixtures/** -text

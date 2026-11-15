@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AurorisNet.Umbraco.ApplicationVirtualPathFix.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests.csproj" />
+  </Folder>
+</Solution>

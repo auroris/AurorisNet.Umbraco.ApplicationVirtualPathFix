@@ -1,0 +1,86 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <StaticWebAssetBasePath>/</StaticWebAssetBasePath>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <PackageId>AurorisNet.Umbraco.ApplicationVirtualPathFix</PackageId>
+    <Title>Umbraco Application Virtual Path Fix</Title>
+    <!-- The first three numbers are the newest supported Umbraco release, and the release workflow supplies the release
+         count. Local packs keep count 0, which is never published, so they cannot shadow a release in NuGet's cache. -->
+    <Version>$(UmbracoMaximumVersion).0</Version>
+    <Authors>Auroris</Authors>
+    <Description>Fixes application virtual path hosting, backoffice assets, media, login and initial token refresh in Umbraco $(UmbracoMinimumVersion) to $(UmbracoMaximumVersion). Registers automatically through Umbraco startup.</Description>
+    <PackageTags>umbraco;umbraco-marketplace;virtual-path;backoffice</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <!-- Embed the symbols and generated sources in the assembly. Source Link points the symbols at this commit on
+         GitHub, so a site's debugger can step into the package. -->
+    <DebugType>embedded</DebugType>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <!-- Generate the XML documentation, so the compiler checks every doc comment: malformed XML, references that do not
+         resolve, mismatched parameter names and undocumented public members. The package includes the file, which
+         gives IntelliSense for the public API. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- The package compiles against the oldest supported Umbraco release, whose own dependencies can carry advisories
+         that later releases fixed. A site restores the dependencies of its own Umbraco release, so audit only the
+         packages this project references. The test project audits the whole graph of the release it runs. -->
+    <NuGetAuditMode>direct</NuGetAuditMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!--
+      Reference the Umbraco packages the package uses rather than the Umbraco.Cms meta-package, so sites that
+      assemble Umbraco from individual packages (for example with ImageSharp2) can install it. The range covers only
+      releases the tests have passed, so restore stops a site on any other release. NuGet compiles the package against
+      the oldest release in the range, which keeps it to APIs every supported release has. Umbraco.Cms.StaticAssets
+      carries the backoffice scripts the package patches, so add a release to the range only after its tests pass.
+    -->
+    <PackageReference Include="Umbraco.Cms.Web.Common" Version="[$(UmbracoMinimumVersion), $(UmbracoMaximumVersion)]" />
+    <PackageReference Include="Umbraco.Cms.StaticAssets" Version="[$(UmbracoMinimumVersion), $(UmbracoMaximumVersion)]" />
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UmbracoMinimumVersion</_Parameter1>
+      <_Parameter2>$(UmbracoMinimumVersion)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UmbracoMaximumVersion</_Parameter1>
+      <_Parameter2>$(UmbracoMaximumVersion)</_Parameter2>
+    </AssemblyAttribute>
+    <Using Include="Microsoft.AspNetCore.Builder" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Umbraco.Extensions" />
+    <!-- nuget.org renders Markdown without HTML or relative links, so the package has its own README. -->
+    <None Include="../docs/NUGET.md" Pack="true" PackagePath="README.md" />
+    <None Include="../LICENSE" Pack="true" PackagePath="/" />
+    <Content Update="appsettings-schema*.json;umbraco-package-schema.json" Pack="false" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+  <!--
+    Records this commit's time in the assembly. Patched files use the later of Umbraco's file time and this time as
+    Last-Modified, so their cache validators agree across restarts and servers and change with each release. Pass
+    -p:SourceTimestamp=2026-11-14T12:00:00Z to set the time, for example when building outside a Git checkout.
+  -->
+  <Target Name="AddSourceTimestamp" BeforeTargets="GetAssemblyAttributes">
+    <!-- %25 is MSBuild's escape for %. On Windows, Exec runs the command from a batch file, where %% is a literal %. -->
+    <Exec Condition="'$(SourceTimestamp)' == '' AND '$(OS)' == 'Windows_NT'" Command="git log -1 --format=%25%25cI" EchoOff="true"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="SourceTimestamp" />
+    </Exec>
+    <Exec Condition="'$(SourceTimestamp)' == '' AND '$(OS)' != 'Windows_NT'" Command="git log -1 --format=%25cI" EchoOff="true"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="SourceTimestamp" />
+    </Exec>
+    <ItemGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(SourceTimestamp)', '^\d{4}-\d\d-\d\dT[^;]+$'))">
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>SourceTimestamp</_Parameter1>
+        <_Parameter2>$(SourceTimestamp)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
+</Project>

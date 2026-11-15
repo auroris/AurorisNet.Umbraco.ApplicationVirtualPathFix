@@ -6,5 +6,6 @@
 *.suo
 artifacts/
 TestResults/
+testResults.xml
 appsettings-schema*.json
 umbraco-package-schema.json

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTestProject>true</IsTestProject>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <IsPackable>false</IsPackable>
+    <CompressionEnabled>false</CompressionEnabled>
+    <!-- Generate the XML documentation, so the compiler checks the doc comments as it does for the package. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Acornima" />
+    <PackageReference Include="Microsoft.Playwright" />
+    <PackageReference Include="Umbraco.Cms" />
+    <PackageReference Include="Umbraco.Cms.DevelopmentMode.Backoffice" />
+    <PackageReference Include="Umbraco.TheStarterKit" />
+    <ProjectReference Include="../../src/AurorisNet.Umbraco.ApplicationVirtualPathFix.csproj" />
+    <Using Include="Xunit" />
+    <!-- The supported releases, which SupportedReleasesTests checks against the package and the patch list. -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UmbracoReleases</_Parameter1>
+      <_Parameter2>$(UmbracoReleases)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      The views a new Umbraco 18.3.1 site starts with, from src/Umbraco.Web.UI/Views in the Umbraco repository
+      (MIT licensed). The build copies them to the output instead of compiling them, and each test site gets a copy.
+    -->
+    <Content Remove="SiteTemplate/**" />
+    <None Include="SiteTemplate/**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Remove="BrowserFixtures/**" />
+    <None Include="BrowserFixtures/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

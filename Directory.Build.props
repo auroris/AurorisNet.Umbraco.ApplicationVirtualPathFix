@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <!-- The Umbraco releases the package supports, oldest first. The package depends on the range from the first to the
+         last, and tests/Test-UmbracoReleases.ps1 runs the tests against each one. -->
+    <UmbracoReleases>18.2.0;18.2.1;18.2.2;18.3.0;18.3.1</UmbracoReleases>
+    <UmbracoMinimumVersion>18.2.0</UmbracoMinimumVersion>
+    <UmbracoMaximumVersion>18.3.1</UmbracoMaximumVersion>
+    <!-- The release the tests run against. Pass -p:UmbracoVersion=18.2.1, for example, to test another one. -->
+    <UmbracoVersion>18.3.1</UmbracoVersion>
+  </PropertyGroup>
+</Project>

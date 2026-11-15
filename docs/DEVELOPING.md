@@ -1,0 +1,260 @@
+# Develop and release the Umbraco 18 fixes
+
+Build the repository to produce `AurorisNet.Umbraco.ApplicationVirtualPathFix` for the
+Umbraco releases listed in `UmbracoReleases` in `Directory.Build.props`, currently
+18.2.0 to 18.3.1. The package depends on the range from `UmbracoMinimumVersion` to
+`UmbracoMaximumVersion`, so NuGet compiles it against the oldest supported release.
+The tests run against the release in `UmbracoVersion`, the newest by default. Pass
+`-p:UmbracoVersion=18.2.1`, for example, to test another, or test every supported
+release with [`tests/Test-UmbracoReleases.ps1`](#test-every-supported-release).
+
+## Build and test
+
+Install the .NET 10 SDK, check out `main`, and run these commands from the
+repository root:
+
+```powershell
+dotnet build tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests
+dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-not-class '*SiteEndToEndTests'
+pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
+dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-class '*SiteEndToEndTests'
+```
+
+The release workflow uses the same order: fast asset, URL and middleware checks first,
+then the browser suite. Omit the class filter to run everything in one invocation.
+Repeat the browser installation after upgrading Playwright. The browser tests build
+five starter-kit sites with their own SQLite databases and start Kestrel on free
+loopback ports, one site at a time. One runs the full affected-feature journey;
+the other four check specific hosting risks. When a step
+fails, the test output includes the page's accessibility tree, and screenshots are
+saved under `bin/Debug/net10.0/e2e-artifacts/<case>/<run>`, next to a `test-output.log`,
+Playwright `trace.zip` and a copy of the site's JSON logs. Traces and logs are saved
+for passing runs too, including failures detected during server shutdown. The release
+workflow uploads these diagnostics even when a test fails. Open a trace with
+`pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 show-trace <path-to-trace.zip>`.
+Set `AVPF_KEEP_TEST_SITE=1` to keep each
+site's folder in the temp directory, with its database and Umbraco logs. Run a
+single test with `-- --filter-method "*Basic_authentication*"`, or select browser
+cases with `AVPF_E2E_CASE`: `full`, `iis`, `proxy`, `proxy-root`, or `basic-auth`.
+Comma-separated lists such as `iis,proxy` are supported; unselected cases skip
+before installing a site. The sites start from
+`SiteTemplate`, the views a new Umbraco 18.3.1 project ships with. Third-party
+embeds and fonts receive fixed offline responses, and jQuery 3.6.0 is vendored
+under `BrowserFixtures` with its MIT license and original integrity hash. `.gitattributes`
+preserves those bytes across checkouts, including Windows with `core.autocrlf=true`. Unexpected
+external requests fail the test. After NuGet restore and browser installation, the
+suite does not need internet access. HTTPS cases use disposable certificates;
+no certificate is installed in the machine's trust store. See
+[Browser validation](FIXES.md#browser-validation) for the checks and their scope.
+
+Both projects generate XML documentation, so every build checks the doc comments. The
+compiler warns about malformed XML, references that do not resolve, parameter names
+that do not match and public members without a comment. Keep the build free of these
+warnings. The package includes the documentation file, which gives IntelliSense for
+its public API.
+
+Every patch is an entry in one of the files in `src/Patchsets`, one file per area of
+Umbraco. `BackOfficeAssetPatches.cs` there joins them into one list and explains how
+to read an entry. An entry names a file by its path in the web root, with `-????????`
+for a bundle's build hash, and lists its changes: it can move the file's quoted
+`/umbraco/backoffice/` URLs under the asset root, apply edits, and add a preamble to
+its first line. `From` and `Before` limit an entry to a range of Umbraco releases; an
+entry without them applies to every supported release. At startup the file provider
+takes the entries for the site's release and applies them top to bottom, so a file
+named by several entries gets all of their changes, in order. Each edit names the
+line of Umbraco's source it changes, and a hashed bundle without edits names a source
+it is built from. The folder holds only these entries, so a reviewer can check every
+change in one place. Each entry has a comment that says what it fixes, its code is
+written as raw string literals that read as they do in Umbraco's file apart from
+placeholders, and every value sits on its own labeled line. Keep new entries in the
+same layout. `src/Assets/AssetPatch.cs` defines the entries, and
+`src/Assets/AssetPatcher.cs` finds the files and applies the changes.
+
+`AssetPatchTests` also checks every patch against the restored Umbraco files without
+starting a site. It fails if a path finds zero or multiple files, if a search pattern
+does not match the number of times its patch expects, if a patch changes the file's
+number of lines, or if a patched script does not parse as JavaScript. The parser,
+Acornima, first reads the script as Umbraco installed it. Keeping generated line
+numbers stable limits source-map drift to the edited lines; column mappings on
+those lines are approximate. Run it on its own with
+`dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-class '*AssetPatchTests'`.
+When adding an Umbraco release, run these checks for it first, as
+[Add an Umbraco release](#add-an-umbraco-release) describes.
+Bundle hash changes alone need no patch edits. Code patches write minified
+identifiers as `@name` placeholders, named after Umbraco's TypeScript source, so a
+rebuild that only renames variables needs no edits either. A repeated `@name` must
+match the same identifier, and `@@` stands for a literal `@`. A behavior change
+expects exactly one match; URL rewrites expect one or more. The package's dependency
+range still admits only the releases that have passed these checks.
+
+`PatchOriginTests` checks each patch against Umbraco's source maps: every match of
+an edit must come from the line of Umbraco's TypeScript that the edit names, so a
+pattern cannot quietly change different code. When a pattern stops matching, the
+failure says whether Umbraco's source still contains that line, in which case only
+the minified output changed and the pattern needs updating, or whether Umbraco
+changed the code, in which case the patch needs another look. When a path finds no
+file, the failure names the bundle that is now built from the patch's sources.
+
+`AssetCoverageTests` independently scans the restored JavaScript and CSS for
+root-absolute asset references. New or renamed files fail the scan unless a patch
+handles them or an explicit exception explains the reference. It also reads
+Umbraco's TypeScript from the bundles' source maps, and the unminified apps that
+ship without maps, and finds each line that builds a URL in a way that can lose the
+virtual path: the server URL joined to a dynamic value, `new URL` with a base, the
+bare origin used to build a URL, and root-absolute paths. A line counts as patched when
+an edit names it, which `PatchOriginTests` confirms, or when its bundle has its asset
+URLs moved. Any other line must carry a review in the test. A new or changed line
+fails, and so does a review that Umbraco's code no longer matches.
+These are conservative line checks, not a JavaScript parser; inspect each new match
+when upgrading Umbraco. Patch checks and the browser journey cover the known URL
+corrections.
+
+`UrlTests` checks media-prefix boundaries, signed queries and fragments, import-map
+entries and scopes, and OAuth callbacks without starting a site. `BackOfficeBodyTests`
+uses the real body Tag Helper, including DI and view-context activation, to check
+attributes, form actions, view scoping and session hints with configured cookie names
+and SameSite modes. Middleware checks cover request-path restoration and version
+warnings. `DecoratorTests` fails if the package leaves a member of an Umbraco interface
+to its default implementation. Umbraco adds members that way, and a decorator written
+before the member existed would otherwise run the default instead of forwarding.
+Because the package compiles against the oldest supported release, a decorator class
+cannot forward a member that a later release adds, as 18.3 added
+`IForgotPasswordUriProvider.CanCreateForgotPasswordUriAsync`. The sign-in link
+wrappers therefore use `ForwardingProxy`, which passes every call it does not replace
+to Umbraco's service, and `DecoratorTests` checks that it reaches the service's own
+implementation of such a member. `SupportedReleasesTests` checks that the dependency
+range matches `UmbracoReleases`, that the release under test is listed, and that every
+entry's `From` and `Before` are release numbers covering at least one supported
+release. `HealthCheckTests` covers the health check's results for a site at the root, a
+working site under a virtual path, and a site with an unsupported Umbraco version, a
+missing path base, an unapplied change and requests outside the virtual path. The
+`full` browser case runs the check through the management API.
+
+`AssetFileProviderTests` checks that startup prepares patched copies without changing
+the original files, and that repeated reads neither repeat patching nor log more
+warnings. Each patched copy's `Last-Modified` is the later of the Umbraco file's time
+and the time of the commit the package was built from, so a second provider, as after
+a restart or on another server, reports the same validators. The build reads that time
+with `git log`. To build outside a Git checkout, pass it as
+`-p:SourceTimestamp=2026-11-14T12:00:00Z`. A small HTTP host exercises the real static-file handler's content lengths,
+HEAD requests, conditional responses and byte ranges. Middleware tests check that
+prepared assets and rendered HTML compress correctly with either middleware ordering.
+These checks do not install Umbraco or start another starter-kit site.
+
+The `full` browser case imports every registered JavaScript module, requests real
+static files with `If-None-Match`, and verifies the login script's content version.
+It combines `/SomeTestPath/Nested`, HTTPS, external media and `Hosting:Debug=false`
+in one site. The proxy cases are `proxy`
+and `proxy-root`: the fixture changes the incoming scheme and host,
+strips the prefix, then passes the original values through `UseForwardedHeaders`.
+They model proxy input within Kestrel; they do not start a separate proxy server.
+
+The fixture adds two images to the starter kit's home template to exercise the
+media picker's published value through `.Url()` and signed `GetCropUrl()` output.
+It supplies the crop helper's services explicitly because Umbraco's convenience
+overload caches the first site's services in static readonly properties, while
+this suite boots several independent sites in one process.
+
+Run the release-script checks with Pester 5.7.1 (also run by the release workflow):
+
+```powershell
+Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+Import-Module Pester -RequiredVersion 5.7.1
+Invoke-Pester .github/scripts/Get-ReleaseVersion.Tests.ps1 -CI
+```
+
+These tests create disposable Git repositories. They cover initial and subsequent
+release counts, counts that follow `UmbracoMaximumVersion` rather than the release
+the tests run against, the .NET assembly version limit, tagged retries, stale commits,
+releases from a branch other than `main`, checkouts that differ from the release
+commit, and malformed version properties. They do not tag or publish this repository.
+
+Clone into a short path on Windows. Playwright's package contains deeply nested
+files, and the build fails with `MSB3021` when a path exceeds 260 characters unless
+long paths are enabled.
+
+## Test every supported release
+
+`tests/Test-UmbracoReleases.ps1` builds the test project once for each release in
+`UmbracoReleases`, into `artifacts/umbraco-releases/<release>`, and then runs the
+tests for all of them at the same time:
+
+```powershell
+pwsh tests/Test-UmbracoReleases.ps1
+pwsh tests/Test-UmbracoReleases.ps1 -Browser
+```
+
+The builds run one at a time, because Umbraco's build targets write
+`appsettings-schema.json` into the project folder and parallel restores can collide
+in the NuGet cache. Each release's tests run in their own process with their own
+temporary folder. The script prints one line per release, lists the failed tests,
+and exits with 1 when any release fails. Pass `-Releases 18.2.1,18.3.0` to test some
+releases, `-Throttle 2` to limit how many run their tests at once, and
+`-ArtifactsPath` to put the builds elsewhere. `-Browser` needs Chromium installed, as
+[Build and test](#build-and-test) shows, and `AVPF_E2E_CASE` selects its cases.
+
+### Add an Umbraco release
+
+1. Add the release to `UmbracoReleases` in `Directory.Build.props`. When it is the
+   newest, also set `UmbracoMaximumVersion` and `UmbracoVersion` to it; the next
+   package release is then numbered after it, starting at `<release>.1`.
+2. Run `pwsh tests/Test-UmbracoReleases.ps1 -Releases <release>`. The fast tests
+   show which entries no longer match, and `PatchOriginTests` says whether Umbraco
+   changed the code or only its minified output.
+3. For each entry that no longer matches, add an entry for the new release with
+   `From` set to it, and give the old entry a `Before` with the same release.
+4. Run `pwsh tests/Test-UmbracoReleases.ps1` and then with `-Browser`, so every
+   supported release passes both tiers.
+
+## Build a package
+
+To build a package locally:
+
+```powershell
+dotnet pack src -c Release -o artifacts/packages
+```
+
+Local builds use `UmbracoMaximumVersion` with a release count of 0, currently
+`18.3.1.0`. Count 0 is never published, so a local package cannot be confused with a
+release in NuGet's cache. The release workflow supplies its selected version as the
+MSBuild `Version` property when building and packing. The assembly embeds its symbols and generated sources, and Source Link points
+them at the commit on GitHub, so a site's debugger can step into the package.
+`ContinuousIntegrationBuild`, which the release workflow sets, keeps the paths in them
+deterministic.
+
+## Publish a release
+
+Push the intended changes to `main`, then open **Actions → Release → Run workflow**
+on GitHub and select `main`. Pushes alone never start a release. The workflow:
+
+1. Checks that it runs from `main`, then chooses the next
+   `<UmbracoMaximumVersion>.<count>`, such as `18.3.1.2`, from the existing release
+   tags.
+2. Builds the package, then runs `tests/Test-UmbracoReleases.ps1` for the fast tests
+   and, after installing Chromium, for the browser tests, so every supported Umbraco
+   release passes both before packing. The browser cases run two releases at a time.
+3. Reserves a tag such as `v18.3.1.2` at the tested commit.
+4. Publishes the package to NuGet and creates a GitHub release with the package
+   attached.
+
+The workflow uploads each release's test logs and browser and server diagnostics, even
+when a test fails.
+
+NuGet trusted publishing is configured for the `AurorisNet` account, GitHub
+repository `auroris/UmbracoApplicationVirtualPathFix`, workflow filename
+`release.yml`, and no environment. The
+workflow obtains a short-lived API key through `NuGet/login` using OIDC. See
+[NuGet trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing)
+for the policy fields.
+
+Re-running a tagged commit reuses its reserved version so a partially completed
+publication can finish. A new count is only allocated for the tip of `main`, so
+re-running an older failed run cannot publish older code under a newer version.
+Release runs are serialized to keep the count consistent. The
+[version-numbering reference](VERSIONING.md) explains how versions relate to the
+supported Umbraco releases.
+
+The package includes the `umbraco-marketplace` tag for Marketplace discovery, and
+`umbraco-marketplace.json` holds the listing metadata. Push changes to that metadata
+before releasing, then validate the published package using the
+[Marketplace listing instructions](VERSIONING.md#marketplace-listing).
