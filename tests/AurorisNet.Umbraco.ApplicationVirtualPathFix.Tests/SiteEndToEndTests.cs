@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text.RegularExpressions;
+using Microsoft.Diagnostics.NETCore.Client;
 using Microsoft.Playwright;
 using MimeKit;
 using SixLabors.ImageSharp;
@@ -11,14 +12,22 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
 /// <summary>
 /// Drives new Umbraco sites with the starter kit through Chromium, one hosting case per test. Browser console errors,
-/// uncaught exceptions, failed requests, HTTP errors and unexpected external requests fail a case, except the expected
-/// 401s when sign-out ends the session under the SSE connection or a management API request that is still loading, and
-/// two known Umbraco errors that have nothing to do with the virtual path. Errors in the site's log and warnings from this
-/// package also fail it.
+/// uncaught exceptions, failed requests, HTTP errors, requests to the site's host outside the virtual path and unexpected
+/// external requests fail a case, except the expected 401s when sign-out ends the session under the SSE connection or a
+/// management API request that is still loading, and three known Umbraco errors that have nothing to do with the virtual
+/// path. Errors in the site's log and warnings from this package also fail it.
 /// </summary>
 public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 {
     private const string PageName = "Virtual path e2e page";
+
+    /// <summary>
+    /// How long a step waits for the site or the browser before it fails. Cases running side by side can slow a site far
+    /// below its usual speed, so the limit is generous. Every wait ends as soon as its condition holds, so a passing case
+    /// takes no longer because of it.
+    /// </summary>
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+
     private ITestOutputHelper _log = output;
 
     /// <summary>
@@ -259,22 +268,22 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 
     /// <summary>
     /// Loads every image on <paramref name="page"/>, lazy ones included, and returns the URLs of those that failed or are
-    /// still loading after 15 seconds. An SVG with no intrinsic width counts as loaded.
+    /// still loading after <see cref="Patience"/>. An SVG with no intrinsic width counts as loaded.
     /// </summary>
     private static Task<string[]> LoadImagesAsync(IPage page) => page.EvaluateAsync<string[]>("""
-        async () => {
+        async timeout => {
           const images = [...document.images];
           for (const image of images) image.loading = 'eager';
           await Promise.all(images.filter(i => !i.complete).map(i => new Promise(done => {
             i.addEventListener('load', done, { once: true });
             i.addEventListener('error', done, { once: true });
-            setTimeout(done, 15000);
+            setTimeout(done, timeout);
           })));
           return images
             .filter(i => i.currentSrc && (!i.complete || (i.naturalWidth === 0 && !/\.svg(\?|$)/i.test(i.currentSrc))))
             .map(i => i.currentSrc);
         }
-        """);
+        """, Patience.TotalMilliseconds);
 
     /// <summary>
     /// Requests a password reset from the login page and checks that the emailed link points at the prefixed login page on
@@ -285,40 +294,32 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         var page = browser.Page;
         var response = await page.GotoAsync(site.Url("/umbraco").ToString());
         Assert.True(response?.Ok, $"The backoffice returned HTTP {response?.Status}");
-        // A click that lands before the login element finishes rendering leaves the view unchanged, so retry it.
+        // A click that lands before the login element finishes rendering leaves the view unchanged, so keep clicking until
+        // the form appears.
         var emailInput = page.Locator("#email input");
-        for (var attempt = 1; !await emailInput.IsVisibleAsync(); attempt++)
-        {
-            await page.Locator("#forgot-password").ClickAsync();
-            try
-            {
-                await emailInput.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 5_000 });
-            }
-            catch (TimeoutException) when (attempt < 3)
-            {
-            }
-        }
+        await WaitClickingAsync(page.Locator("#forgot-password"), () => emailInput.IsVisibleAsync(),
+            () => "The forgotten-password form did not open.", ct);
 
         await emailInput.FillAsync(TestSite.Email);
         await page.GetByRole(AriaRole.Button, new() { Name = "Submit", Exact = true }).ClickAsync();
 
-        var email = await WaitForFileAsync(site.MailDirectory, "*.eml", TimeSpan.FromSeconds(30), ct);
-        MimeMessage message;
-        for (var attempt = 1; ; attempt++)
+        var email = await WaitForFileAsync(site.MailDirectory, "*.eml", ct);
+        MimeMessage? message = null;
+        await WaitUntilAsync(async () =>
         {
             try
             {
                 message = await MimeMessage.LoadAsync(email, ct);
-                break;
+                return true;
             }
-            catch (IOException) when (attempt < 20)
+            catch (IOException)
             {
                 // Umbraco may still be writing the file.
-                await Task.Delay(250, ct);
+                return false;
             }
-        }
+        }, () => $"The email {email} stayed unreadable.", ct);
 
-        var body = message.HtmlBody ?? message.TextBody ?? "";
+        var body = message!.HtmlBody ?? message.TextBody ?? "";
         var match = ResetLink().Match(body);
         Assert.True(match.Success, $"No reset link in the email: {body}");
         var link = new Uri(WebUtility.HtmlDecode(match.Value));
@@ -330,8 +331,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         response = await resetPage.GotoAsync(link.ToString());
         Assert.True(response?.Ok, $"The reset link returned HTTP {response?.Status}");
         // The page validates the reset code through the API before it offers the form.
-        await Expect(resetPage.GetByRole(AriaRole.Textbox, new() { Name = "New password", Exact = true }))
-            .ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(resetPage.GetByRole(AriaRole.Textbox, new() { Name = "New password", Exact = true })).ToBeVisibleAsync();
         await resetPage.CloseAsync();
     }
 
@@ -349,8 +349,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await page.Locator("#password-input").FillAsync(TestSite.Password);
         await page.Locator("#umb-login-button").ClickAsync();
         var dashboard = page.Locator("umb-umbraco-news-dashboard");
-        await Expect(dashboard.GetByRole(AriaRole.Heading, new() { Name = TestSite.NewsHeading, Exact = true }))
-            .ToBeVisibleAsync(new() { Timeout = 60_000 });
+        await Expect(dashboard.GetByRole(AriaRole.Heading, new() { Name = TestSite.NewsHeading, Exact = true })).ToBeVisibleAsync();
 
         await page.GetByRole(AriaRole.Button, new() { Name = "View Umbraco CMS system information and version number", Exact = true }).ClickAsync();
         var logo = page.Locator("umb-backoffice-header-logo img#logo");
@@ -374,8 +373,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await page.ReloadAsync();
         Assert.True((await token).Ok, "Restoring the session must refresh its token successfully.");
         var dashboard = page.Locator("umb-umbraco-news-dashboard");
-        await Expect(dashboard.GetByRole(AriaRole.Heading, new() { Name = TestSite.NewsHeading, Exact = true }))
-            .ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(dashboard.GetByRole(AriaRole.Heading, new() { Name = TestSite.NewsHeading, Exact = true })).ToBeVisibleAsync();
         Assert.StartsWith(backoffice + "/", new Uri(page.Url).AbsolutePath);
     }
 
@@ -392,7 +390,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             response => response.Request.IsNavigationRequest && response.Url.StartsWith(site.Url("/umbraco").ToString()));
         Assert.Equal("cross-site", await navigation.HeaderValueAsync("x-test-fetch-site"));
         Assert.Equal("no", await navigation.HeaderValueAsync("x-test-refresh-cookie"));
-        await Expect(page.Locator("umb-umbraco-news-dashboard")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator("umb-umbraco-news-dashboard")).ToBeVisibleAsync();
         await Expect(page.Locator("umb-app")).ToHaveAttributeAsync("data-restore-session", "");
     }
 
@@ -447,14 +445,23 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await richText.FillAsync("Edited rich text");
         await Expect(richText).ToHaveTextAsync("Edited rich text");
         await page.WaitForFunctionAsync("() => document.querySelector('umb-app').shadowRoot.querySelector('umb-code-editor')?.editor?.monacoEditor");
+        // Monaco sets up its JSON support in the background after the editor starts, and until then it refuses requests
+        // for the JSON worker with "JSON not registered!". Ask again until it answers.
         var errors = await page.EvaluateAsync<int>("""
             async () => {
               const { monaco } = await import('@umbraco-cms/backoffice/external/monaco-editor');
               const model = document.querySelector('umb-app').shadowRoot.querySelector('umb-code-editor').editor.monacoEditor.getModel();
-              const worker = await (await monaco.languages.json.getWorker())(model.uri);
-              return (await worker.doValidation(model.uri.toString())).length;
+              for (;;) {
+                try {
+                  const worker = await (await monaco.languages.json.getWorker())(model.uri);
+                  return (await worker.doValidation(model.uri.toString())).length;
+                } catch (error) {
+                  if (!String(error).includes('JSON not registered')) throw error;
+                  await new Promise(resolve => setTimeout(resolve, 250));
+                }
+              }
             }
-            """).WaitAsync(TimeSpan.FromSeconds(30));
+            """).WaitAsync(Patience);
         Assert.True(errors > 0, "The JSON worker should report the deliberately invalid JSON.");
         // The editor may render no codicons on its own. The Find widget shows some, which loads their font.
         await page.EvaluateAsync("""
@@ -499,10 +506,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
               }});
               return result.response.status;
             }
-            """, global::Umbraco.Cms.Core.Constants.Security.EditorGroupKey.ToString());
+            """, global::Umbraco.Cms.Core.Constants.Security.EditorGroupKey.ToString()).WaitAsync(Patience, ct);
         Assert.Equal(201, status);
         string? body = null;
-        for (var attempt = 0; attempt < 60 && body is null; attempt++)
+        await WaitUntilAsync(async () =>
         {
             foreach (var file in Directory.GetFiles(site.MailDirectory, "*.eml").Where(file => !existing.Contains(file)))
             {
@@ -511,10 +518,13 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
                     using var message = await MimeMessage.LoadAsync(file, ct);
                     body = message.HtmlBody ?? message.TextBody;
                 }
-                catch (IOException) { }
+                catch (IOException)
+                {
+                    // Umbraco may still be writing the file.
+                }
             }
-            if (body is null) await Task.Delay(250, ct);
-        }
+            return body is not null;
+        }, () => "No invitation email arrived.", ct);
         Assert.NotNull(body);
         var match = Regex.Match(body, "https?://[^\\s\"'<>]+flow=invite[^\\s\"'<>]*");
         Assert.True(match.Success, "The invitation should contain a login link.");
@@ -525,8 +535,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         try
         {
             await page.GotoAsync(link.ToString());
-            await Expect(page.GetByRole(AriaRole.Textbox, new() { Name = "New password", Exact = true }))
-                .ToBeVisibleAsync(new() { Timeout = 30_000 });
+            await Expect(page.GetByRole(AriaRole.Textbox, new() { Name = "New password", Exact = true })).ToBeVisibleAsync();
         }
         finally { await page.CloseAsync(); }
     }
@@ -545,14 +554,14 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await page.GotoAsync(site.Url("/umbraco/section/content").ToString());
         // The workspace's router slot overlaps the tree item's actions button, so dispatch the click to the button.
         var actions = page.GetByRole(AriaRole.Button, new() { Name = "View actions for 'Home'", Exact = true });
-        await Expect(actions).ToBeAttachedAsync(new() { Timeout = 30_000 });
+        await Expect(actions).ToBeAttachedAsync();
         await actions.DispatchEventAsync("click");
         // data-mark attributes are the selectors Umbraco's own acceptance tests use. This one is in Home's actions menu,
         // not the Content root's create button, which is always visible.
         await page.Locator("umb-entity-action-list [data-mark='entity-action:Umb.EntityAction.Document.Create']")
             .Filter(new() { Visible = true }).First.ClickAsync();
         var documentTypes = page.Locator("uui-ref-node-document-type");
-        await Expect(documentTypes.First).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(documentTypes.First).ToBeVisibleAsync();
         // The starter kit's Content Page needs only a page title.
         var names = await documentTypes.EvaluateAllAsync<string[]>("types => types.map(type => type.name ?? '')");
         var index = Array.FindIndex(names, name => name.StartsWith("Content Page", StringComparison.Ordinal));
@@ -563,31 +572,25 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await page.GetByRole(AriaRole.Textbox, new() { Name = "Page Title" }).First.FillAsync(pageName);
         await page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.SaveAndPublish']").ClickAsync();
 
-        // An invariant document publishes at once. A variant document asks which variants to publish, so confirm the
-        // dialog if it appears.
+        // An invariant document publishes at once, and the workspace then moves from its create route to the new document's
+        // edit route. A variant document first asks which variants to publish. Wait for whichever comes, so a dialog that
+        // appears late is still confirmed.
         var confirm = page.Locator("umb-document-publish-modal, umb-document-save-and-publish-modal")
-            .GetByRole(AriaRole.Button, new() { NameRegex = PublishButton() });
-        try
-        {
-            await confirm.First.ClickAsync(new() { Timeout = 3_000 });
-        }
-        catch (TimeoutException)
-        {
-        }
+            .GetByRole(AriaRole.Button, new() { NameRegex = PublishButton() }).First;
+        await WaitClickingAsync(confirm, () => Task.FromResult(page.Url.Contains("/workspace/document/edit/", StringComparison.Ordinal)),
+            () => $"Umbraco did not create the page: the workspace is still at {new Uri(page.Url).AbsolutePath}.", ct);
 
         // The new page is published under Home, which the starter kit serves at the site root.
         var url = site.Url($"/{slug}/");
         using var http = site.CreateHttpClient();
-        HttpStatusCode status = default;
-        for (var attempt = 0; attempt < 30 && status != HttpStatusCode.OK; attempt++)
+        var status = default(HttpStatusCode);
+        await WaitUntilAsync(async () =>
         {
-            if (attempt > 0)
-                await Task.Delay(1_000, ct);
             using var probe = await http.GetAsync(url, ct);
             status = probe.StatusCode;
-        }
+            return status == HttpStatusCode.OK;
+        }, () => $"The published page {url.AbsolutePath} still returns HTTP {(int)status}.", ct);
 
-        Assert.Equal(HttpStatusCode.OK, status);
         var front = await page.Context.NewPageAsync();
         try
         {
@@ -614,23 +617,23 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
                 await Expect(preview.Locator("umb-app")).ToBeAttachedAsync();
                 await AssertServerSentEventsAsync(preview, "PreviewHub");
             }
+            // The preview window loads the page into a frame of its own.
             IFrame? frame = null;
-            for (var attempt = 0; attempt < 60 && frame is null; attempt++)
+            await WaitUntilAsync(() =>
             {
                 frame = preview.Frames.FirstOrDefault(candidate => candidate != preview.MainFrame
-                    && Uri.TryCreate(candidate.Url, UriKind.Absolute, out var url) && url.Scheme.StartsWith("http", StringComparison.Ordinal));
-                if (frame is null)
-                    await Task.Delay(500, ct);
-            }
+                    && Uri.TryCreate(candidate.Url, UriKind.Absolute, out var address) && address.Scheme.StartsWith("http", StringComparison.Ordinal));
+                return Task.FromResult(frame is not null);
+            }, () => "The preview window did not load the page.", ct);
 
             Assert.NotNull(frame);
             _log.WriteLine($"Preview frame: {new Uri(frame.Url).AbsolutePath}");
             Assert.StartsWith(site.Url("/").AbsolutePath, new Uri(frame.Url).AbsolutePath, StringComparison.OrdinalIgnoreCase);
-            await Expect(frame.Locator("body")).ToContainTextAsync(draftTitle, new() { Timeout = 30_000 });
+            await Expect(frame.Locator("body")).ToContainTextAsync(draftTitle);
             // Saving another draft refreshes the open frame through SignalR, also in the IIS case without WebSockets.
             await page.GetByRole(AriaRole.Textbox, new() { Name = "Page Title" }).First.FillAsync(updatedTitle);
             await page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.Save']").ClickAsync();
-            await Expect(preview.FrameLocator("iframe").Locator("body")).ToContainTextAsync(updatedTitle, new() { Timeout = 30_000 });
+            await Expect(preview.FrameLocator("iframe").Locator("body")).ToContainTextAsync(updatedTitle);
             var published = await http.GetStringAsync(url, ct);
             Assert.Contains(pageName, published);
             Assert.DoesNotContain(draftTitle, published);
@@ -648,7 +651,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         {
             await website.GotoAsync(url.ToString());
             var end = website.Locator("umb-website-preview button.end");
-            await Expect(end).ToBeVisibleAsync(new() { Timeout = 30_000 });
+            await Expect(end).ToBeVisibleAsync();
             var reloaded = website.WaitForResponseAsync(response => response.Request.IsNavigationRequest);
             var ended = await website.RunAndWaitForResponseAsync(() => end.ClickAsync(),
                 response => response.Request.Method == "DELETE" && new Uri(response.Url).AbsolutePath.EndsWith("/management/api/v1/preview"));
@@ -677,19 +680,14 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 
         await page.GotoAsync(site.Url("/umbraco/section/media").ToString());
         await page.Locator("umb-dropzone-media input[type=file], umb-dropzone input[type=file]").First.SetInputFilesAsync(file);
-        // Several media types accept an image; pick Image if Umbraco asks.
-        var picker = page.Locator("umb-dropzone-media-type-picker-modal");
-        try
-        {
-            await picker.GetByText("Image", new() { Exact = true }).First.ClickAsync(new() { Timeout = 3_000 });
-        }
-        catch (TimeoutException)
-        {
-        }
-
-        // Umbraco names the item after the file: "E2E Upload", or "e2e-upload.png" in the releases that keep the file name.
-        var item = page.GetByText(UploadedMediaName()).First;
-        await Expect(item).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        // Several media types accept an image, so Umbraco may ask which one to create; pick Image if it does. Wait for
+        // whichever comes, the question or the new item, so a question that appears late is still answered. Umbraco names
+        // the item after the file: "E2E Upload", or "e2e-upload.png" in the releases that keep the file name. Only the
+        // created item is a link; the card shown while the file uploads has the file's name too, but opens nothing.
+        var choice = page.Locator("umb-dropzone-media-type-picker-modal").GetByText("Image", new() { Exact = true }).First;
+        var item = page.GetByRole(AriaRole.Link, new() { NameRegex = UploadedMediaName() }).First;
+        await WaitClickingAsync(choice, async () => await item.IsVisibleAsync() && !await choice.IsVisibleAsync(),
+            () => "The uploaded image did not appear in the media section.", ct);
         await item.ClickAsync();
         // Only the file's own URL contains its name; backoffice routes use keys. The image preview and the Info view's
         // links must each address the file under the site's path, with the prefix once.
@@ -698,7 +696,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         foreach (var workspaceView in new[] { "Umb.WorkspaceView.Media.Edit", "Umb.WorkspaceView.Media.Info" })
         {
             await page.Locator($"[data-mark='workspace:view-link:{workspaceView}']").ClickAsync();
-            await Expect(references.First).ToBeAttachedAsync(new() { Timeout = 30_000 });
+            await Expect(references.First).ToBeAttachedAsync();
             foreach (var found in await references.EvaluateAllAsync<string[]>("elements => elements.map(e => e.getAttribute('href') ?? e.getAttribute('src'))"))
             {
                 var address = new Uri(new Uri(new Uri(page.Url), found).GetLeftPart(UriPartial.Path));
@@ -724,7 +722,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
               if (result.error) throw new Error(JSON.stringify(result.error));
               return result.data[0].urlInfos[0].url;
             }
-            """, key);
+            """, key).WaitAsync(Patience, ct);
         Assert.StartsWith(site.Url("/media/").AbsolutePath, new Uri(resizeUrl).AbsolutePath, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("hmac=", resizeUrl, StringComparison.Ordinal);
         var resized = await page.Context.APIRequest.GetAsync(resizeUrl);
@@ -745,21 +743,55 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Returns the first file in <paramref name="directory"/> that matches <paramref name="pattern"/>, checking every
-    /// 250 ms. Throws <see cref="TimeoutException"/> when none appears within <paramref name="timeout"/>.
+    /// Returns the first file in <paramref name="directory"/> that matches <paramref name="pattern"/> once one appears.
+    /// Throws <see cref="TimeoutException"/> when none appears within <see cref="Patience"/>.
     /// </summary>
-    private static async Task<string> WaitForFileAsync(string directory, string pattern, TimeSpan timeout, CancellationToken ct)
+    private static async Task<string> WaitForFileAsync(string directory, string pattern, CancellationToken ct)
     {
-        var deadline = DateTime.UtcNow + timeout;
-        while (true)
+        string? found = null;
+        await WaitUntilAsync(() => Task.FromResult((found = Directory.EnumerateFiles(directory, pattern).FirstOrDefault()) is not null),
+            () => $"No {pattern} file appeared in {directory}.", ct);
+        return found!;
+    }
+
+    /// <summary>
+    /// Checks <paramref name="done"/> every 250 ms until it returns true. Throws a <see cref="TimeoutException"/> with the
+    /// message from <paramref name="failure"/> when <see cref="Patience"/> runs out first.
+    /// </summary>
+    private static async Task WaitUntilAsync(Func<Task<bool>> done, Func<string> failure, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + Patience;
+        while (!await done())
         {
-            if (Directory.EnumerateFiles(directory, pattern).FirstOrDefault() is { } file)
-                return file;
             if (DateTime.UtcNow > deadline)
-                throw new TimeoutException($"No {pattern} file appeared in {directory}.");
+                throw new TimeoutException(failure());
             await Task.Delay(250, ct);
         }
     }
+
+    /// <summary>
+    /// Waits like <see cref="WaitUntilAsync"/>, and meanwhile clicks <paramref name="button"/> whenever it is visible. This
+    /// suits a dialog that Umbraco shows in some setups and not in others, and a click that is lost while a view is still
+    /// rendering. Unlike a short look for the button, it still clicks a button that appears late.
+    /// </summary>
+    private static Task WaitClickingAsync(ILocator button, Func<Task<bool>> done, Func<string> failure, CancellationToken ct)
+        => WaitUntilAsync(async () =>
+        {
+            if (await done())
+                return true;
+            if (await button.IsVisibleAsync())
+            {
+                try
+                {
+                    await button.ClickAsync(new() { Timeout = 5_000 });
+                }
+                catch (TimeoutException)
+                {
+                    // The button went away meanwhile, so check again.
+                }
+            }
+            return false;
+        }, failure, ct);
 
     /// <summary>Matches the password-reset link in Umbraco's email.</summary>
     [GeneratedRegex("""https?://[^\s"'<>]+flow=reset-password[^\s"'<>]*""")]
@@ -805,9 +837,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         public ConcurrentQueue<string> Errors { get; } = new();
 
         /// <summary>
-        /// Launches Chromium with tracing and a page script that records <c>EventSource</c> connections. The context serves
-        /// fixed offline responses for known external hosts and records console errors, script errors, failed requests,
-        /// HTTP errors and unexpected external requests. Returns the session with one open page.
+        /// Launches Chromium with tracing and a page script that records <c>EventSource</c> connections. Every wait in the
+        /// context defaults to <see cref="Patience"/>. The context serves fixed offline responses for known external hosts
+        /// and records console errors, script errors, failed requests, HTTP errors, requests to the site's host outside the
+        /// virtual path and unexpected external requests. Returns the session with one open page.
         /// </summary>
         public static async Task<BrowserSession> StartAsync(TestSite site, ITestOutputHelper output, string artifacts)
         {
@@ -817,6 +850,9 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             {
                 browser = await playwright.Chromium.LaunchAsync();
                 var context = await browser.NewContextAsync(new() { IgnoreHTTPSErrors = site.Options.Https });
+                context.SetDefaultTimeout((float)Patience.TotalMilliseconds);
+                context.SetDefaultNavigationTimeout((float)Patience.TotalMilliseconds);
+                Assertions.SetDefaultExpectTimeout((float)Patience.TotalMilliseconds);
                 var session = new BrowserSession(playwright, browser, context, site, output, artifacts);
                 await context.Tracing.StartAsync(new() { Screenshots = true, Snapshots = true, Sources = true });
                 await context.AddInitScriptAsync("""
@@ -833,7 +869,13 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
                 {
                     var url = new Uri(route.Request.Url);
                     if (url.Authority == site.Address.Authority)
+                    {
+                        // Check the path here, as the request leaves. A request that the page cancels, such as an image
+                        // whose address changes before it loads, gets no response for the other checks to see.
+                        if (!session.IsUnderVirtualPath(url))
+                            session.Errors.Enqueue($"[{session._step}] Request outside the virtual path: {route.Request.Method} {url}");
                         await route.ContinueAsync();
+                    }
                     else if (url.AbsoluteUri == "https://outside.example.test/")
                         await route.FulfillAsync(new() { ContentType = "text/html", Body = $"<a href=\"{site.Url("/umbraco")}\">Backoffice</a>" });
                     else if (url.AbsoluteUri == "https://code.jquery.com/jquery-3.6.0.min.js")
@@ -923,7 +965,9 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         /// release under test that has nothing to do with the virtual path. The tags input of Umbraco 17.5 and 18.0 sets
         /// the width of an element that is not always rendered, which throws during a re-render; 17.6 and 18.1 check for
         /// the element first. In every supported release, a document workspace controller can read a variant's language
-        /// before the languages have loaded.
+        /// before the languages have loaded, and the sign-in page stops waiting for its translations after two seconds and
+        /// rejects with "Localization not available", which a busy machine can exceed. A translation request that fails
+        /// outright still fails the case as an HTTP error.
         /// </summary>
         private static bool IsKnownUmbracoError(string error)
         {
@@ -932,7 +976,9 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
                     && error.StartsWith("TypeError: Cannot read properties of null (reading 'style')", StringComparison.Ordinal)
                     && frame.Contains("/packages/tags/tags-input.element-", StringComparison.Ordinal))
                 || (error.StartsWith("TypeError: Cannot read properties of undefined (reading 'isDefault')", StringComparison.Ordinal)
-                    && frame.Contains("/packages/documents/document-allow-edit-invariant-from-non-default-controller-base-", StringComparison.Ordinal));
+                    && frame.Contains("/packages/documents/document-allow-edit-invariant-from-non-default-controller-base-", StringComparison.Ordinal))
+                // The page rejects with a bare string, which has no stack.
+                || error.Trim().TrimStart(':').Trim() == "Localization not available";
         }
 
         /// <summary>Opens another page in the session's context, where the same error recording applies.</summary>
@@ -957,10 +1003,34 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             => _step == "Sign out" && url.StartsWith(_site.Url("/umbraco/management/api/").ToString(), StringComparison.Ordinal);
 
         /// <summary>
-        /// Runs <paramref name="step"/> under <paramref name="name"/>, which labels the errors recorded meanwhile. When the
-        /// step fails, captures every open page before rethrowing.
+        /// Returns whether <paramref name="url"/>, an address on the site's host, is at or under the virtual path. Case does
+        /// not matter, as on IIS.
         /// </summary>
-        public async Task StepAsync(string name, Func<Task> step)
+        private bool IsUnderVirtualPath(Uri url)
+            => PathString.FromUriComponent(url).StartsWithSegments(_site.Options.Prefix, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Runs <paramref name="step"/> under <paramref name="name"/>, which labels the errors recorded meanwhile. When the
+        /// step fails, saves a memory dump of this process, which hosts the site, and captures every open page before
+        /// rethrowing.
+        /// </summary>
+        public Task StepAsync(string name, Func<Task> step) => RunStepAsync(name, step, dump: true);
+
+        /// <summary>
+        /// Checks, as a final step, that the browser reported no errors. A failure here saves no memory dump, because the
+        /// errors happened during earlier steps.
+        /// </summary>
+        public Task AssertNoErrorsAsync() => RunStepAsync("Browser errors", () =>
+        {
+            Assert.Empty(Errors);
+            return Task.CompletedTask;
+        }, dump: false);
+
+        /// <summary>
+        /// Runs <paramref name="step"/> under <paramref name="name"/>. When the step fails, saves a memory dump if
+        /// <paramref name="dump"/> is true, then captures every open page before rethrowing.
+        /// </summary>
+        private async Task RunStepAsync(string name, Func<Task> step, bool dump)
         {
             _step = name;
             _output.WriteLine($"Step: {name}");
@@ -970,25 +1040,41 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             }
             catch
             {
-                await CaptureAsync(name);
+                var file = string.Concat(name.Split(Path.GetInvalidFileNameChars())).Replace(' ', '-');
+                // Dump first, while whatever the site was stuck on is most likely still running.
+                if (dump)
+                    await DumpAsync(file);
+                await CaptureAsync(file);
                 throw;
             }
         }
 
-        /// <summary>Checks, as a final step, that the browser reported no errors.</summary>
-        public Task AssertNoErrorsAsync() => StepAsync("Browser errors", () =>
+        /// <summary>
+        /// Saves a memory dump of this process, which hosts the site, as <paramref name="file"/>.dmp in the artifacts
+        /// folder. When a step fails because the site stopped answering, the dump shows what the site was waiting on, for
+        /// example through <c>dotnet-dump analyze</c> and its <c>dumpasync</c> command.
+        /// </summary>
+        private async Task DumpAsync(string file)
         {
-            Assert.Empty(Errors);
-            return Task.CompletedTask;
-        });
+            var path = Path.Combine(_artifacts, file + ".dmp");
+            try
+            {
+                await new DiagnosticsClient(Environment.ProcessId).WriteDumpAsync(DumpType.WithHeap, path, logDumpGeneration: false, CancellationToken.None);
+                _output.WriteLine($"Memory dump: {path}");
+            }
+            catch (Exception exception)
+            {
+                // Dumping must never hide the step's own failure.
+                _output.WriteLine($"Could not save a memory dump: {exception.Message}");
+            }
+        }
 
         /// <summary>
-        /// Saves a full-page screenshot of every open page, named after <paramref name="step"/>, and writes each page's URL
+        /// Saves a full-page screenshot of every open page, named after <paramref name="file"/>, and writes each page's URL
         /// and accessibility snapshot to the test output.
         /// </summary>
-        private async Task CaptureAsync(string step)
+        private async Task CaptureAsync(string file)
         {
-            var file = string.Concat(step.Split(Path.GetInvalidFileNameChars())).Replace(' ', '-');
             foreach (var (page, index) in Context.Pages.Select((page, index) => (page, index)))
             {
                 try

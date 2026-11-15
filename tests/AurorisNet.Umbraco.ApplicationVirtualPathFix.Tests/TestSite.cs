@@ -237,6 +237,15 @@ internal sealed class TestSite : IAsyncDisposable
         {
             ["ConnectionStrings:umbracoDbDSN"] = $"Data Source={Path.Combine(root, "umbraco.db")};Pooling=False",
             ["ConnectionStrings:umbracoDbDSN_ProviderName"] = "Microsoft.Data.Sqlite",
+            // Umbraco's background jobs commit database writes on their own schedule: the distributed jobs every five
+            // seconds, the cache instruction sync after changes, and the server registration every minute. SQLite gives each
+            // connection a snapshot, so a commit between a transaction's first read and its first write makes that write
+            // impossible, and Umbraco retries it for minutes; saves, sign-ins and invitations all hit this on a busy machine.
+            // A single test site needs none of these jobs, which update caches on other servers and run housekeeping, so
+            // each runs once at most during a test.
+            ["Umbraco:CMS:DistributedJobs:Delay"] = "01:00:00",
+            ["Umbraco:CMS:Global:DatabaseServerMessenger:TimeBetweenSyncOperations"] = "01:00:00",
+            ["Umbraco:CMS:Global:DatabaseServerRegistrar:WaitTimeBetweenCalls"] = "01:00:00",
             ["Umbraco:CMS:Global:Id"] = Guid.NewGuid().ToString(),
             ["Umbraco:CMS:Global:UseHttps"] = "false",
             // One HMAC key for both boots keeps image URL signing enabled, as on a normally installed site.
@@ -351,8 +360,8 @@ internal sealed class TestSite : IAsyncDisposable
 
     /// <summary>
     /// Stops the site, copies its logs to the artifacts folder when one was given, and returns the errors it logged after
-    /// the restart, plus any warning from this package, such as a patch that no longer matches Umbraco's scripts. Returns
-    /// an empty list when the site has already stopped.
+    /// the restart, apart from one known Examine startup race, plus any warning from this package, such as a patch that no
+    /// longer matches Umbraco's scripts. Returns an empty list when the site has already stopped.
     /// </summary>
     public async Task<IReadOnlyList<string>> StopAsync()
     {
@@ -384,6 +393,10 @@ internal sealed class TestSite : IAsyncDisposable
                 if (isError || isPackageWarning)
                 {
                     var template = properties.TryGetProperty("@mt", out var mt) ? mt.GetString() : "";
+                    // Examine can find its index locked when it first creates it after the restart, a race in its startup
+                    // that a busy machine exposes and that has nothing to do with the virtual path.
+                    if (source == "Examine.BaseIndexProvider" && template?.StartsWith("Could not acquire lock in EnsureIndex", StringComparison.Ordinal) == true)
+                        continue;
                     var exception = properties.TryGetProperty("@x", out var x) ? " " + x.GetString() : "";
                     problems.Add($"{level} {source}: {template}{exception}");
                 }

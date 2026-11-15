@@ -27,7 +27,7 @@ Where the builds, logs and temporary files go. Defaults to artifacts/umbraco-rel
 
 .PARAMETER Throttle
 How many test processes run at once. Defaults to the number of releases for the fast tests, so every release's fast
-tests run at once, and to a quarter of the processor count for the browser cases.
+tests run at once, and to half the processor count for the browser cases.
 #>
 param(
     [string[]] $Releases,
@@ -48,9 +48,9 @@ if (-not $Releases) {
     $Releases = ([string] $settings.Project.PropertyGroup.UmbracoReleases).Split(';',
         [StringSplitOptions]::RemoveEmptyEntries -bor [StringSplitOptions]::TrimEntries)
 }
-# Each browser case runs a site and Chromium, and its timing-sensitive steps time out on a busy machine, so by default
-# run as many as a quarter of the processors at once.
-if ($Throttle -le 0) { $Throttle = $Browser ? [Math]::Max(1, [Math]::Floor([Environment]::ProcessorCount / 4)) : $Releases.Count }
+# Each browser case runs a site and Chromium, which keep about two processors busy, so by default run as many as half
+# the processors at once.
+if ($Throttle -le 0) { $Throttle = $Browser ? [Math]::Max(1, [Math]::Floor([Environment]::ProcessorCount / 2)) : $Releases.Count }
 
 # The browser cases, as SiteEndToEndTests names them. The fast tests run as one unnamed case.
 $cases = @($null)

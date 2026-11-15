@@ -54,7 +54,7 @@ public sealed partial class SiteEndToEndTests
               if (saved.error) throw new Error(JSON.stringify(saved.error));
               return data;
             }
-            """, dataType.Key.ToString());
+            """, dataType.Key.ToString()).WaitAsync(Patience);
         var thumbnail = site.Url("/images/test-thumbnail.svg").ToString();
         try
         {
@@ -83,7 +83,7 @@ public sealed partial class SiteEndToEndTests
                   const result = await DataTypeService.putDataTypeById({ path: { id }, body: JSON.parse(json) });
                   if (result.error) throw new Error(JSON.stringify(result.error));
                 }
-                """, new { id = dataType.Key.ToString(), json = original.GetRawText() });
+                """, new { id = dataType.Key.ToString(), json = original.GetRawText() }).WaitAsync(Patience);
         }
     }
 
@@ -103,7 +103,7 @@ public sealed partial class SiteEndToEndTests
               if (error) throw new Error(JSON.stringify(error));
               return data.checks.find(check => check.id.toLowerCase() === id)?.results ?? null;
             }
-            """, VirtualPathHealthCheck.CheckId);
+            """, VirtualPathHealthCheck.CheckId).WaitAsync(Patience);
         Assert.True(results.ValueKind == JsonValueKind.Array, "The Configuration group must include the application virtual path check.");
         var statuses = results.EnumerateArray()
             .Select(result => (Type: result.GetProperty("resultType").GetString(), Message: result.GetProperty("message").GetString()!)).ToArray();
@@ -117,7 +117,7 @@ public sealed partial class SiteEndToEndTests
     /// </summary>
     private static async Task AssertImageLoadsAsync(ILocator image, string url)
     {
-        await Expect(image).ToHaveAttributeAsync("src", url, new() { Timeout = 30_000 });
+        await Expect(image).ToHaveAttributeAsync("src", url);
         // decode() rejects when the image fails to load.
         await image.EvaluateAsync("image => image.decode()");
     }
@@ -227,7 +227,7 @@ public sealed partial class SiteEndToEndTests
     {
         await page.WaitForFunctionAsync("""
             hub => window.__testEventSources?.some(url => new URL(url).pathname.endsWith('/umbraco/' + hub))
-            """, hub, new() { Timeout = 30_000 });
+            """, hub);
     }
 
     /// <summary>
@@ -286,14 +286,9 @@ public sealed partial class SiteEndToEndTests
         // Reading the page and the saved value back confirms that the picker saved the uploaded media, not the previous
         // image.
         using var http = site.CreateHttpClient();
-        string html = "";
-        for (var attempt = 0; attempt < 30; attempt++)
-        {
-            html = await http.GetStringAsync(site.Url("/"), TestContext.Current.CancellationToken);
-            if (html.Contains("e2e-upload", StringComparison.OrdinalIgnoreCase)) break;
-            await Task.Delay(250, TestContext.Current.CancellationToken);
-        }
-        Assert.Contains("e2e-upload", html, StringComparison.OrdinalIgnoreCase);
+        var ct = TestContext.Current.CancellationToken;
+        await WaitUntilAsync(async () => (await http.GetStringAsync(site.Url("/"), ct)).Contains("e2e-upload", StringComparison.OrdinalIgnoreCase),
+            () => "The home page does not show the picked image.", ct);
         Assert.Contains(mediaKey, site.Services.GetRequiredService<IContentService>().GetById(home.Key)!
             .GetValue<string>("HeroBackgroundImage"), StringComparison.OrdinalIgnoreCase);
         var front = await page.Context.NewPageAsync();

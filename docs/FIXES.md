@@ -189,16 +189,23 @@ EventSource open event for both the backoffice server-events hub and the preview
 hub. Each site has image signing enabled with a fresh test key.
 
 Browser console errors, uncaught JavaScript exceptions, failed requests and HTTP
-errors fail the test, as do server errors and package warnings. Two expected
+errors fail the test, as do server errors and package warnings. So does any
+request to the site's host outside the virtual path. The test checks each request
+as the browser sends it, so a request that the page cancels before it completes
+still counts. Two expected
 responses during sign-out are recorded separately, and both also occur on a root
 site. Without WebSockets, Umbraco revokes the session before SignalR sends its SSE
 close message, causing a 401 on the server-event hub's POST. A management API GET
 that is still loading when the session ends, such as the content tree's, also gets a
-401; a request outside the virtual path would get a 404 instead. Two Umbraco bugs
+401; a request outside the virtual path would get a 404 instead. Three Umbraco bugs
 that have nothing to do with the virtual path are ignored on the releases that have
 them: the tags input of Umbraco 17.5 and 18.0 can throw while it re-renders, which
-17.6 and 18.1 fixed, and in every supported release a document workspace controller
-can read a variant's language before the languages have loaded. The starter kit's external
+17.6 and 18.1 fixed; in every supported release a document workspace controller
+can read a variant's language before the languages have loaded; and the sign-in page
+gives up waiting for its translations after two seconds, which a busy machine can
+exceed. A translation request that fails outright still fails the test. In the site's
+log, one Examine error is ignored: the search index can be locked when Examine first
+creates it after the site restarts. The starter kit's external
 dependencies receive deterministic local responses; unexpected external requests
 fail. Browser routing disables its HTTP
 cache, so conditional-response behavior is tested separately with an HTTP client.

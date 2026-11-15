@@ -24,11 +24,20 @@ Run the fast asset, URL and middleware checks first, then the browser suite. Omi
 class filter to run everything in one invocation.
 Repeat the browser installation after upgrading Playwright. The browser tests build
 five starter-kit sites with their own SQLite databases and start Kestrel on free
-loopback ports, one site at a time. One runs the full affected-feature journey;
-the other four check specific hosting risks. When a step
+loopback ports, one site at a time. Each site runs Umbraco's background jobs at most
+once: the distributed jobs, the cache instruction sync and the server registration.
+Those jobs commit database writes on their own schedule, and on a busy machine such a
+commit can leave a save, sign-in or invitation that read the database just before
+retrying a write that SQLite can never accept. One runs the full affected-feature journey;
+the other four check specific hosting risks. Each step waits up to a minute for the
+site or the browser, because several cases often run at once; a wait ends as soon as
+its condition holds. When a step
 fails, the test output includes the page's accessibility tree, and screenshots are
 saved under `bin/Debug/net10.0/e2e-artifacts/<case>/<run>`, next to a `test-output.log`,
-Playwright `trace.zip` and a copy of the site's JSON logs. Traces and logs are saved
+Playwright `trace.zip` and a copy of the site's JSON logs. The failed step also saves
+a memory dump of the test process, which hosts the site, as `<step>.dmp`. If the site
+stopped answering, open the dump with the `dotnet-dump` tool's `analyze` command:
+`clrstack -all` and `dumpasync` show what the site was waiting on. Traces and logs are saved
 for passing runs too, including failures detected during server shutdown. Open a trace with
 `pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 show-trace <path-to-trace.zip>`.
 Set `AVPF_KEEP_TEST_SITE=1` to keep each
@@ -202,9 +211,8 @@ case runs in a process of its own, as Umbraco 17 needs. Every process has its ow
 temporary folder. The script prints one line per release, lists the failed tests,
 and exits with 1 when any release fails. Pass `-Releases 18.2.1,18.3.0` to test some
 releases, `-Throttle 2` to limit how many test processes run at once (by default,
-every release's fast tests run at once, and browser cases a quarter as many as the
-machine has processors, because their timing-sensitive steps time out on a busy
-machine), and
+every release's fast tests run at once, and browser cases half as many as the
+machine has processors, because each keeps a site and Chromium busy), and
 `-ArtifactsPath` to put the builds elsewhere. `-Browser` needs Chromium installed, as
 [Build and test](#build-and-test) shows, and `AVPF_E2E_CASE` selects its cases.
 
