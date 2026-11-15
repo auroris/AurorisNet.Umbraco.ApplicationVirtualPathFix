@@ -43,6 +43,12 @@ suite does not need internet access. HTTPS cases use disposable certificates;
 no certificate is installed in the machine's trust store. See
 [Browser validation](FIXES.md#browser-validation) for the checks and their scope.
 
+Both projects generate XML documentation, so every build checks the doc comments. The
+compiler warns about malformed XML, references that do not resolve, parameter names
+that do not match and public members without a comment. Keep the build free of these
+warnings. The package includes the documentation file, which gives IntelliSense for
+its public API.
+
 Every patch is one entry in the `Patches` table in `BackOfficeAssetPatches.cs`: the
 file's path in the web root, with `-????????` for a bundle's build hash, and its
 changes. An entry can move the file's quoted `/umbraco/backoffice/` URLs under the

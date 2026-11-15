@@ -22,6 +22,10 @@
          GitHub, so a site's debugger can step into the package. -->
     <DebugType>embedded</DebugType>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <!-- Generate the XML documentation, so the compiler checks every doc comment: malformed XML, references that do not
+         resolve, mismatched parameter names and undocumented public members. The package includes the file, which
+         gives IntelliSense for the public API. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests" />
