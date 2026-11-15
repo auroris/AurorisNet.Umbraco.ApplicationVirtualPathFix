@@ -11,6 +11,10 @@ internal sealed class SourceMap
     private readonly Dictionary<int, string[]> _lines = [];
     private List<Segment[]>? _segments;
 
+    /// <summary>
+    /// Creates a map from its normalized sources, their contents and its encoded mappings, which
+    /// <see cref="OriginalLines"/> decodes when it first needs them.
+    /// </summary>
     private SourceMap(string[] sources, string?[] contents, string mappings)
     {
         Sources = sources;
@@ -18,11 +22,16 @@ internal sealed class SourceMap
         _mappings = mappings;
     }
 
-    /// <summary>The sources as the map names them, without leading parent segments, such as <c>src/packages/...</c>.</summary>
+    /// <summary>
+    /// The sources as the map names them, with leading <c>../</c> segments removed, such as <c>src/packages/...</c>.
+    /// </summary>
     public string[] Sources { get; }
 
     public string?[] Contents { get; }
 
+    /// <summary>
+    /// Reads the source map in <paramref name="file"/>, or returns <see langword="null"/> when the file is missing.
+    /// </summary>
     public static async Task<SourceMap?> ReadAsync(IFileInfo file)
     {
         if (!file.Exists) return null;
@@ -31,6 +40,9 @@ internal sealed class SourceMap
         return new SourceMap(json!.Sources.Select(Normalize).ToArray(), json.SourcesContent ?? new string?[json.Sources.Length], json.Mappings ?? "");
     }
 
+    /// <summary>
+    /// Removes leading <c>../</c> segments from <paramref name="source"/>, so it matches the paths that patches name.
+    /// </summary>
     public static string Normalize(string source)
     {
         while (source.StartsWith("../", StringComparison.Ordinal))
@@ -38,7 +50,10 @@ internal sealed class SourceMap
         return source;
     }
 
-    /// <summary>A line of a source's text, or null when the map does not include it.</summary>
+    /// <summary>
+    /// Returns zero-based line <paramref name="line"/> of source <paramref name="source"/>, or <see langword="null"/>
+    /// when the map lacks that source's text or the line.
+    /// </summary>
     public string? Line(int source, int line)
     {
         if (!_lines.TryGetValue(source, out var lines))
@@ -46,7 +61,10 @@ internal sealed class SourceMap
         return line < lines.Length ? lines[line] : null;
     }
 
-    /// <summary>The first line of a source that contains <paramref name="code"/>, with its one-based number.</summary>
+    /// <summary>
+    /// Returns the first line of source <paramref name="source"/> that contains <paramref name="code"/>, trimmed, with
+    /// its one-based number, or <see langword="null"/> when no line does.
+    /// </summary>
     public (int Number, string Text)? Find(int source, string code)
     {
         for (var line = 0; Line(source, line) is { } text; line++)
@@ -54,7 +72,10 @@ internal sealed class SourceMap
         return null;
     }
 
-    /// <summary>The original lines, as (source index, zero-based line), that produced generated code from start up to end.</summary>
+    /// <summary>
+    /// Returns the original lines, as a source index and a zero-based line, that produced the code in
+    /// <paramref name="generated"/> from offset <paramref name="start"/> up to <paramref name="end"/>.
+    /// </summary>
     public IEnumerable<(int Source, int Line)> OriginalLines(string generated, int start, int end)
     {
         _segments ??= Decode(_mappings);
@@ -73,6 +94,7 @@ internal sealed class SourceMap
         }
     }
 
+    /// <summary>Converts <paramref name="offset"/> in <paramref name="text"/> to a zero-based line and column.</summary>
     private static (int Line, int Column) Position(string text, int offset)
     {
         var line = text.AsSpan(0, offset).Count('\n');
@@ -106,7 +128,7 @@ internal sealed class SourceMap
                     value = shift = 0;
                 }
 
-                // Fields are relative to the previous segment; one without a source maps nothing.
+                // Each field is relative to the previous segment's. A segment without a source maps nothing, so skip it.
                 column += values[0];
                 if (values.Count < 4) continue;
                 source += values[1];
@@ -119,7 +141,12 @@ internal sealed class SourceMap
         return lines;
     }
 
+    /// <summary>
+    /// A decoded mapping: generated code from <paramref name="Column"/> came from zero-based line
+    /// <paramref name="OriginalLine"/> of source <paramref name="Source"/>.
+    /// </summary>
     private readonly record struct Segment(int Column, int Source, int OriginalLine);
 
+    /// <summary>The fields of a source map file that the tests read.</summary>
     private sealed record Json(string[] Sources, string?[]? SourcesContent, string? Mappings);
 }

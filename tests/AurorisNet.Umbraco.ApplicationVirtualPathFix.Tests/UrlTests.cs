@@ -3,13 +3,18 @@ using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Core.Manifest;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
-using Umbraco.Cms.Web.Common.Hosting;
 using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
+/// <summary>Checks the media URL, import map and OAuth callback corrections without starting a site.</summary>
 public sealed class UrlTests
 {
+    /// <summary>
+    /// Checks that the media URL assembler removes only a duplicated virtual path from media URLs and keeps the rest of
+    /// Umbraco's result exactly, signed queries and fragments included. A URL that needs no change comes back as the
+    /// same instance.
+    /// </summary>
     [Theory]
     [InlineData("/portal", "~/media", "/portal/media/image.png", "/portal/portal/media/image.png", "/portal/media/image.png")]
     [InlineData("/portal", "~/media", "/portal/media/image.png", "https://site.test/portal/portal/media/image.png", "https://site.test/portal/media/image.png")]
@@ -28,7 +33,8 @@ public sealed class UrlTests
         string prefix, string mediaPath, string input, string upstream, string expected,
         string suffix = "?width=100&hmac=A%2Bb%2F%3D#crop")
     {
-        // These exact bytes are significant to signed URLs; also retain a fragment for callers.
+        // The default suffix holds a signed query, whose exact bytes the signature covers, and a fragment that callers
+        // keep.
         var current = new Uri("https://site.test/portal/");
         var upstreamUri = new Uri(upstream + suffix, UriKind.RelativeOrAbsolute);
         var mode = upstreamUri.IsAbsoluteUri ? UrlMode.Absolute : UrlMode.Relative;
@@ -39,7 +45,7 @@ public sealed class UrlTests
             Assert.Equal(mode, requestedMode);
             return upstreamUri;
         });
-        var assembler = new MediaUrlAssembler(inner, new Hosting(prefix), new GlobalSettings { UmbracoMediaPath = mediaPath });
+        var assembler = new MediaUrlAssembler(inner, new TestHostingEnvironment(prefix), new GlobalSettings { UmbracoMediaPath = mediaPath });
 
         var actual = assembler.AssembleUrl(input + suffix, current, mode);
 
@@ -47,6 +53,12 @@ public sealed class UrlTests
         if (upstream == expected) Assert.Same(upstreamUri, actual);
     }
 
+    /// <summary>
+    /// Checks that the import map decorator prefixes root-absolute imports and scopes, including a path that only
+    /// starts with the prefix's text, such as <c>/portal-other</c>. Relative, absolute, protocol-relative and prefixed
+    /// URLs stay as they are, and the auth module maps to the package's wrapper. Umbraco's cached map stays unchanged,
+    /// so a second call returns the same result.
+    /// </summary>
     [Fact]
     public async Task Import_map_rewrites_root_urls_and_scopes_without_mutating_cached_input()
     {
@@ -70,7 +82,7 @@ public sealed class UrlTests
                 ["https://cdn.test/"] = new() { ["dependency"] = "//cdn.test/dependency.js" },
             },
         };
-        var service = new ApplicationVirtualPathFixComposer.VirtualPathImportMapService(new Manifests(source), new Paths("/portal"));
+        var service = new ApplicationVirtualPathFixComposer.VirtualPathImportMapService(new Manifests(source), new TestBackOfficePaths("/portal"));
 
         var result = await service.GetPackageManifestImportmapAsync();
 
@@ -97,6 +109,10 @@ public sealed class UrlTests
         Assert.Equal(result.Imports.OrderBy(entry => entry.Key), again.Imports.OrderBy(entry => entry.Key));
     }
 
+    /// <summary>
+    /// Checks that at the root the import map keeps its URLs and its missing scopes, while the auth module still maps to
+    /// the package's wrapper.
+    /// </summary>
     [Fact]
     public async Task Root_import_map_keeps_original_urls_and_absent_scopes()
     {
@@ -108,7 +124,7 @@ public sealed class UrlTests
                 ["plugin"] = "/App_Plugins/Example/main.js",
             },
         };
-        var service = new ApplicationVirtualPathFixComposer.VirtualPathImportMapService(new Manifests(source), new Paths(""));
+        var service = new ApplicationVirtualPathFixComposer.VirtualPathImportMapService(new Manifests(source), new TestBackOfficePaths(""));
 
         var result = await service.GetPackageManifestImportmapAsync();
 
@@ -119,6 +135,10 @@ public sealed class UrlTests
         Assert.StartsWith("/App_Plugins/AurorisNet.Umbraco.ApplicationVirtualPathFix/auth.js?v=", result.Imports["@umbraco-cms/backoffice/auth"]);
     }
 
+    /// <summary>
+    /// Checks that custom OAuth callback paths, with or without a leading slash or already prefixed, get the virtual
+    /// path exactly once, and that a site at the root keeps them as configured.
+    /// </summary>
     [Theory]
     [InlineData("/portal", "/portal/custom/login", "/portal/custom/logout", "/portal/custom/error")]
     [InlineData("/a/b", "/a/b/custom/login", "/a/b/custom/logout", "/a/b/custom/error")]
@@ -127,7 +147,7 @@ public sealed class UrlTests
         string prefix, string login, string logout, string error)
     {
         var services = new ServiceCollection();
-        services.AddSingleton<IHostingEnvironment>(new Hosting(prefix));
+        services.AddSingleton<IHostingEnvironment>(new TestHostingEnvironment(prefix));
         services.Configure<SecuritySettings>(settings =>
         {
             settings.AuthorizeCallbackPathName = "custom/login";
@@ -144,41 +164,23 @@ public sealed class UrlTests
         Assert.Equal(error, settings.AuthorizeCallbackErrorPathName);
     }
 
+    /// <summary>A URL assembler that returns what <paramref name="assemble"/> builds.</summary>
     private sealed class StubAssembler(Func<string, Uri, UrlMode, Uri> assemble) : IUrlAssembler
     {
+        /// <summary>Returns the URL the test's function builds for <paramref name="path"/>.</summary>
         public Uri AssembleUrl(string path, Uri current, UrlMode mode) => assemble(path, current, mode);
     }
 
+    /// <summary>A manifest service that returns <paramref name="map"/> as Umbraco's import map.</summary>
     private sealed class Manifests(PackageManifestImportmap map) : IPackageManifestService
     {
+        /// <summary>Returns the same map instance on every call, as Umbraco's cache does.</summary>
         public Task<PackageManifestImportmap> GetPackageManifestImportmapAsync() => Task.FromResult(map);
+        /// <summary>Throws <see cref="NotSupportedException"/>, because the tests read only the import map.</summary>
         public Task<IEnumerable<PackageManifest>> GetAllPackageManifestsAsync() => throw new NotSupportedException();
+        /// <summary>Throws <see cref="NotSupportedException"/>, because the tests read only the import map.</summary>
         public Task<IEnumerable<PackageManifest>> GetPublicPackageManifestsAsync() => throw new NotSupportedException();
+        /// <summary>Throws <see cref="NotSupportedException"/>, because the tests read only the import map.</summary>
         public Task<IEnumerable<PackageManifest>> GetPrivatePackageManifestsAsync() => throw new NotSupportedException();
-    }
-
-    private sealed class Paths(string prefix) : IBackOfficePathGenerator
-    {
-        public string BackOfficePath => prefix + "/umbraco";
-        public string BackOfficeVirtualDirectory => BackOfficePath + "/backoffice";
-        public string BackOfficeCacheBustHash => "hash";
-        public string BackOfficeAssetsPath => BackOfficeVirtualDirectory + "/" + BackOfficeCacheBustHash;
-    }
-
-    private sealed class Hosting(string prefix) : IHostingEnvironment
-    {
-        public string ApplicationVirtualPath => prefix;
-        public string ToAbsolute(string virtualPath) => virtualPath.StartsWith("~/", StringComparison.Ordinal)
-            ? prefix.TrimEnd('/') + virtualPath[1..] : virtualPath;
-        public string? SiteName => throw new NotSupportedException();
-        public string ApplicationId => throw new NotSupportedException();
-        public string ApplicationPhysicalPath => throw new NotSupportedException();
-        public string LocalTempPath => throw new NotSupportedException();
-        public bool IsDebugMode => throw new NotSupportedException();
-        public bool IsHosted => throw new NotSupportedException();
-        public Uri? ApplicationMainUrl => throw new NotSupportedException();
-        public string MapPathWebRoot(string path) => throw new NotSupportedException();
-        public string MapPathContentRoot(string path) => throw new NotSupportedException();
-        public void EnsureApplicationMainUrl(Uri? currentApplicationUrl) => throw new NotSupportedException();
     }
 }

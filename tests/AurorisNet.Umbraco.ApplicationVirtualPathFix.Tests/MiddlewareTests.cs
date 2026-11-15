@@ -7,15 +7,30 @@ using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Umbraco.Cms.Core.Configuration;
 using Umbraco.Cms.Core.Configuration.Models;
-using Umbraco.Cms.Core.Semver;
 using Umbraco.Cms.Web.Common.Hosting;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
+/// <summary>Checks the package's middleware, mostly in small Kestrel hosts, and the startup version warning.</summary>
 public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixture<AssetPatchTests.Assets>
 {
-    public enum CompressionOrder { None, Before, After }
+    /// <summary>Where a test adds response compression relative to the virtual-path middleware.</summary>
+    public enum CompressionOrder
+    {
+        /// <summary>The pipeline has no response compression.</summary>
+        None,
 
+        /// <summary>Response compression runs before the virtual-path middleware.</summary>
+        Before,
+
+        /// <summary>Response compression runs after the virtual-path middleware.</summary>
+        After,
+    }
+
+    /// <summary>
+    /// Checks that only an HTML request under <c>/umbraco</c> with a differently cased prefix is redirected to the
+    /// configured prefix, keeping its query string; scripts and site pages pass through.
+    /// </summary>
     [Theory]
     [InlineData("/PORTAL/umbraco?code=a%2Fb&state=x", "text/html", true)]
     [InlineData("/PORTAL/umbraco/backoffice/hash/example.js", "application/javascript", false)]
@@ -35,6 +50,10 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         await app.StopAsync(CancellationToken.None);
     }
 
+    /// <summary>
+    /// Checks that patched assets and the rendered backoffice page arrive intact with or without response compression,
+    /// on either side of the virtual-path middleware.
+    /// </summary>
     [Theory]
     [InlineData(CompressionOrder.None)]
     [InlineData(CompressionOrder.Before)]
@@ -42,7 +61,7 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
     public async Task Patched_assets_and_rendered_html_use_normal_response_compression(CompressionOrder compression)
     {
         await using var app = CreateApp();
-        app.Environment.WebRootFileProvider = new BackOfficeAssetFileProvider(assets.Files, new Paths(), "/portal", NullLogger.Instance);
+        app.Environment.WebRootFileProvider = new BackOfficeAssetFileProvider(assets.Files, new TestBackOfficePaths("/portal"), "/portal", NullLogger.Instance);
         app.UsePathBase("/portal");
         if (compression == CompressionOrder.Before) app.UseResponseCompression();
         app.UseUmbracoPathsUnderPathBase();
@@ -78,6 +97,10 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         await app.StopAsync(CancellationToken.None);
     }
 
+    /// <summary>
+    /// Checks that startup logs one warning naming both versions when the site runs a different Umbraco version, and
+    /// none when the versions match.
+    /// </summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -87,7 +110,7 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         var actual = differentVersion ? new Version(installed.Major, installed.Minor, installed.Build + 1) : installed;
         using var logger = new RecordedLogs();
         using var services = new ServiceCollection().AddLogging(logging => logging.AddProvider(logger))
-            .AddSingleton<IUmbracoVersion>(new TestVersion(actual)).BuildServiceProvider();
+            .AddSingleton<IUmbracoVersion>(new TestUmbracoVersion(actual)).BuildServiceProvider();
         ApplicationVirtualPathFixComposer.WarnOnUmbracoVersionMismatch(services);
         Assert.Equal(differentVersion ? 1 : 0, logger.Warnings.Count);
         if (differentVersion)
@@ -97,6 +120,10 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         }
     }
 
+    /// <summary>
+    /// Checks that the middleware gives the rest of the pipeline the prefixed path and restores the original path
+    /// afterwards, also when the pipeline throws, keeping the path base throughout.
+    /// </summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -125,34 +152,35 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         Assert.Equal("/portal", context.Request.PathBase.Value);
     }
 
-    private sealed class TestVersion(Version version) : IUmbracoVersion
-    {
-        public Version Version => version;
-        public string Comment => "";
-        public Version AssemblyVersion => Version;
-        public Version AssemblyFileVersion => Version;
-        public SemVersion SemanticVersion => new(version.Major, version.Minor, version.Build);
-    }
-
+    /// <summary>A logger provider whose logger keeps the text of each warning.</summary>
     private sealed class RecordedLogs : ILoggerProvider, ILogger
     {
         public ConcurrentQueue<string> Warnings { get; } = new();
+        /// <summary>Returns this logger for every category.</summary>
         public ILogger CreateLogger(string categoryName) => this;
+        /// <summary>Starts no scope and returns <see langword="null"/>.</summary>
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        /// <summary>Returns whether <paramref name="level"/> is <see cref="LogLevel.Warning"/>.</summary>
         public bool IsEnabled(LogLevel level) => level == LogLevel.Warning;
+        /// <summary>Keeps the formatted message of each warning.</summary>
         public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             if (level == LogLevel.Warning) Warnings.Enqueue(formatter(state, exception));
         }
+        /// <summary>Releases nothing, because the provider holds no resources.</summary>
         public void Dispose() { }
     }
 
+    /// <summary>
+    /// Builds an app on a free loopback port with backoffice paths under <c>/portal</c>, the body Tag Helper component
+    /// and response compression registered.
+    /// </summary>
     private static WebApplication CreateApp()
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
-        builder.Services.AddSingleton<IBackOfficePathGenerator, Paths>();
+        builder.Services.AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths("/portal"));
         builder.Services.AddControllersWithViews();
         builder.Services.AddTransient<ITagHelperComponent, BackOfficeBodyTagHelperComponent>();
         builder.Services.Configure<GlobalSettings>(options => options.UseHttps = false);
@@ -163,14 +191,7 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         return builder.Build();
     }
 
+    /// <summary>Returns the address the started <paramref name="app"/> listens on.</summary>
     private static string Address(WebApplication app)
         => app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
-
-    private sealed class Paths : IBackOfficePathGenerator
-    {
-        public string BackOfficePath => "/portal/umbraco";
-        public string BackOfficeVirtualDirectory => BackOfficePath + "/backoffice";
-        public string BackOfficeCacheBustHash => "hash";
-        public string BackOfficeAssetsPath => BackOfficeVirtualDirectory + "/" + BackOfficeCacheBustHash;
-    }
 }

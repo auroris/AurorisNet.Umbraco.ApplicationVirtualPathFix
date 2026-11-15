@@ -10,19 +10,26 @@ using Umbraco.Cms.Web.Common.Hosting;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
+/// <summary>
+/// Checks the patched file provider's bytes and metadata, and its responses through the static-file middleware.
+/// </summary>
 public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : IClassFixture<AssetPatchTests.Assets>
 {
     private const string Prefix = "/portal/nested";
     private const string Login = "/umbraco/login/login.js";
     private const string WebsiteCss = "/umbraco/website/nonodes.css";
 
+    /// <summary>
+    /// Checks that each patched file has its own bytes, length and read-only streams, no physical path, and a
+    /// <c>Last-Modified</c> time that a second provider repeats, while the original and unpatched files stay as they are.
+    /// </summary>
     [Fact]
     public async Task Prepared_assets_have_their_own_bytes_and_metadata_and_leave_originals_intact()
     {
         var provider = CreateProvider();
         // Another server, or the same one after a restart, must offer the same cache validators.
         var restarted = CreateProvider();
-        // The build records when the package's source was committed.
+        // The build records the time of the commit the package was built from.
         Assert.NotEqual(DateTimeOffset.MinValue, BackOfficeAssetFileProvider.SourceTimestamp);
         var paths = assets.PatchedPaths();
         Assert.Equal(BackOfficeAssetPatches.Patches.Length, paths.Length);
@@ -58,12 +65,16 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         Assert.False(provider.GetFileInfo("/missing.js").Exists);
     }
 
+    /// <summary>
+    /// Checks that the provider reads each Umbraco file and logs each change it cannot apply once, while preparing the
+    /// file; later requests neither read the file again nor log more warnings.
+    /// </summary>
     [Fact]
     public async Task Files_are_read_and_missing_patterns_reported_only_during_preparation()
     {
         var login = new ChangedLogin();
         var logger = new RecordedWarnings();
-        var provider = new BackOfficeAssetFileProvider(new LoginOverride(assets.Files, login), new Paths(), Prefix, logger);
+        var provider = new BackOfficeAssetFileProvider(new LoginOverride(assets.Files, login), new TestBackOfficePaths(Prefix), Prefix, logger);
         Assert.Equal(1, login.Reads);
         Assert.Equal(3, logger.Messages.Count);
         Assert.Equal(3, logger.Messages.Distinct().Count());
@@ -74,13 +85,17 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         Assert.Equal(3, logger.Messages.Count);
     }
 
+    /// <summary>
+    /// Checks that the static-file middleware serves patched files with their patched lengths and validators, and
+    /// answers HEAD, conditional and range requests from the patched bytes.
+    /// </summary>
     [Fact]
     public async Task Static_file_responses_use_patched_lengths_validators_and_ranges()
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
-        builder.Services.AddSingleton<IBackOfficePathGenerator, Paths>();
+        builder.Services.AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths(Prefix));
         await using var app = builder.Build();
         var provider = CreateProvider();
         app.Environment.WebRootFileProvider = provider;
@@ -94,8 +109,8 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         foreach (var path in new[] { Login, WebsiteCss, "/umbraco/backoffice/packages/core/manifests.js", "/umbraco/backoffice/css/umb-css.css" })
         {
             var expected = await ReadAsync(provider.GetFileInfo(path));
-            var url = path.StartsWith(BackOfficeAssetPatches.AssetsRoot, StringComparison.Ordinal)
-                ? new Paths().BackOfficeAssetsPath + path[BackOfficeAssetPatches.AssetsRoot.Length..] : Prefix + path;
+            var url = path.StartsWith(AssetPatcher.AssetsRoot, StringComparison.Ordinal)
+                ? new TestBackOfficePaths(Prefix).BackOfficeAssetsPath + path[AssetPatcher.AssetsRoot.Length..] : Prefix + path;
             using var response = await http.GetAsync(url, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal(expected, await response.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken));
@@ -126,9 +141,11 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         await app.StopAsync(CancellationToken.None);
     }
 
+    /// <summary>Creates a provider that patches the restored assets for a site under <see cref="Prefix"/>.</summary>
     private BackOfficeAssetFileProvider CreateProvider()
-        => new(assets.Files, new Paths(), Prefix, NullLogger.Instance);
+        => new(assets.Files, new TestBackOfficePaths(Prefix), Prefix, NullLogger.Instance);
 
+    /// <summary>Reads every byte of <paramref name="file"/>.</summary>
     private static async Task<byte[]> ReadAsync(IFileInfo file)
     {
         await using var source = file.CreateReadStream();
@@ -137,21 +154,22 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         return output.ToArray();
     }
 
-    private sealed class Paths : IBackOfficePathGenerator
-    {
-        public string BackOfficePath => Prefix + "/umbraco";
-        public string BackOfficeVirtualDirectory => BackOfficePath + "/backoffice";
-        public string BackOfficeCacheBustHash => "hash";
-        public string BackOfficeAssetsPath => BackOfficeVirtualDirectory + "/" + BackOfficeCacheBustHash;
-    }
-
+    /// <summary>
+    /// Serves <paramref name="login"/> as Umbraco's <c>login.js</c>, and every other file from <paramref name="inner"/>.
+    /// </summary>
     private sealed class LoginOverride(IFileProvider inner, IFileInfo login) : IFileProvider
     {
+        /// <summary>
+        /// Returns the replacement for <c>login.js</c>, and the inner provider's file for any other path.
+        /// </summary>
         public IFileInfo GetFileInfo(string subpath) => subpath == Login ? login : inner.GetFileInfo(subpath);
+        /// <summary>Lists the inner provider's directory.</summary>
         public IDirectoryContents GetDirectoryContents(string subpath) => inner.GetDirectoryContents(subpath);
+        /// <summary>Watches the inner provider's files.</summary>
         public IChangeToken Watch(string filter) => inner.Watch(filter);
     }
 
+    /// <summary>A <c>login.js</c> whose code Umbraco has changed, which counts how often it is read.</summary>
     private sealed class ChangedLogin : IFileInfo
     {
         private readonly byte[] _bytes = Encoding.UTF8.GetBytes("/* upstream changed */");
@@ -162,14 +180,19 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         public long Length => _bytes.LongLength;
         public DateTimeOffset LastModified => DateTimeOffset.UnixEpoch;
         public string? PhysicalPath => null;
+        /// <summary>Counts the read and opens a read-only stream over the file's bytes.</summary>
         public Stream CreateReadStream() { Reads++; return new MemoryStream(_bytes, writable: false); }
     }
 
+    /// <summary>A logger that keeps the text of each warning.</summary>
     private sealed class RecordedWarnings : ILogger
     {
         public List<string> Messages { get; } = [];
+        /// <summary>Starts no scope and returns <see langword="null"/>.</summary>
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        /// <summary>Returns whether <paramref name="level"/> is <see cref="LogLevel.Warning"/>.</summary>
         public bool IsEnabled(LogLevel level) => level == LogLevel.Warning;
+        /// <summary>Keeps the formatted message of each warning.</summary>
         public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             if (level == LogLevel.Warning) Messages.Add(formatter(state, exception));

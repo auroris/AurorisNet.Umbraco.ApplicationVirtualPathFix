@@ -48,15 +48,20 @@ file's path in the web root, with `-????????` for a bundle's build hash, and its
 changes. An entry can move the file's quoted `/umbraco/backoffice/` URLs under the
 asset root, apply edits, and add a preamble to its first line. Each edit names the
 line of Umbraco's source it changes, and a hashed bundle without edits names a source
-it is built from. The file provider and the tests all read this table.
+it is built from. The file holds only this table, so a reviewer can check every change
+in one place. Each entry has a comment that says what it fixes, its code is written as
+raw string literals that read as they do in Umbraco's file apart from placeholders,
+and every value sits on its own labeled line. Keep new entries in the same layout.
+`AssetPatch.cs` defines the entries, and `AssetPatcher.cs` finds the files and applies
+the changes. The file provider and the tests all read this table.
 
 `AssetPatchTests` also checks every patch against the restored Umbraco files without
 starting a site. It fails if a path finds zero or multiple files, if a search pattern
 does not match the number of times its patch expects, if a patch changes the file's
 number of lines, or if a patched script does not parse as JavaScript. The parser,
-Acornima, first reads the script as Umbraco installed it. Unchanged line numbers
-keep Umbraco's source maps accurate for patched files in the browser's developer
-tools. Run it on its own with
+Acornima, first reads the script as Umbraco installed it. Keeping generated line
+numbers stable limits source-map drift to the edited lines; column mappings on
+those lines are approximate. Run it on its own with
 `dotnet test --project tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests --no-build -- --filter-class '*AssetPatchTests'`.
 When updating `UmbracoVersion`, build and run these checks before the full suite.
 Bundle hash changes alone need no patch edits. Code patches write minified

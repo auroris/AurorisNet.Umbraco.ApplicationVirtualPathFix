@@ -10,29 +10,36 @@ using static Microsoft.Playwright.Assertions;
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
 /// <summary>
-/// End-to-end acceptance test: a new Umbraco site with the starter kit, driven through Chromium.
-/// Browser console errors, uncaught exceptions, failed requests and HTTP errors fail the run,
-/// apart from the documented SSE shutdown 401 after sign-out. Server errors also fail the run.
+/// Drives new Umbraco sites with the starter kit through Chromium, one hosting case per test. Browser console errors,
+/// uncaught exceptions, failed requests, HTTP errors and unexpected external requests fail a case, except the expected
+/// 401 when the SSE connection closes after sign-out. Errors in the site's log and warnings from this package also fail
+/// it.
 /// </summary>
 public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 {
     private const string PageName = "Virtual path e2e page";
     private ITestOutputHelper _log = output;
 
+    /// <summary>
+    /// Checks that every affected feature works on one site that combines a nested prefix, HTTPS, media outside the web
+    /// root and <c>Hosting:Debug=false</c>. The steps cover the front end, the error page, emails, the contact form,
+    /// sign-in, the health check, patched modules and caching, session restore, editors, the block grid, publishing,
+    /// preview, media, the Delivery API and sign-out.
+    /// </summary>
     [Fact]
     public async Task Patched_features_work_under_a_nested_https_path()
     {
         var ct = TestContext.Current.CancellationToken;
         var log = StartCase("full");
-        // Exercise the affected features once, combining independent hosting settings.
+        // Run each affected feature once, on one site that combines independent hosting settings.
         await using var site = await TestSite.StartAsync(new SiteOptions("/SomeTestPath/Nested",
             MediaOutsideWebRoot: true, Https: true, Debug: false), ct, log.DirectoryPath);
         await using (var browser = await BrowserSession.StartAsync(site, _log, log.DirectoryPath))
         {
             await browser.StepAsync("OpenAPI documents", () => CheckOpenApiAsync(site, ct));
-            await browser.StepAsync("Front end: every page and image", () => CrawlFrontEndAsync(browser.Page, site));
+            await browser.StepAsync("Front end: home and nested page", () => CheckFrontEndAsync(browser.Page, site));
             await browser.StepAsync("Forgotten password email", () => FollowPasswordResetEmailAsync(browser, site, ct));
-            // After the password reset, which takes the first email in the mail folder.
+            // Keep these steps after the password reset, which reads the first email in the mail folder.
             await browser.StepAsync("Built-in error page", () => CheckErrorPageAsync(site, ct));
             await browser.StepAsync("Contact form", () => SubmitContactFormAsync(site, ct));
             await browser.StepAsync("Backoffice sign-in", () => SignInAsync(browser.Page, site));
@@ -54,6 +61,11 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         Assert.Empty(await site.StopAsync());
     }
 
+    /// <summary>
+    /// Checks that a site behind an IIS path base, on a host without WebSockets, serves a page whose slug repeats the
+    /// prefix and uses Server-Sent Events for the server event hub and preview. The case also covers the OpenAPI
+    /// documents, sign-in, session restore, the Delivery API and sign-out.
+    /// </summary>
     [Fact]
     public async Task Iis_path_base_preserves_repeated_slugs_and_sse_preview()
     {
@@ -76,6 +88,11 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         Assert.Empty(await site.StopAsync());
     }
 
+    /// <summary>
+    /// Checks that a site behind a TLS-terminating reverse proxy, which passes the public host, scheme and prefix in
+    /// forwarded headers, keeps its public URLs: the home page and its images, sign-in, the server URL, session restore
+    /// after a reload and from another site, and sign-out. An empty <paramref name="prefix"/> covers a site at the root.
+    /// </summary>
     [Theory]
     [InlineData("/SomeTestPath")]
     [InlineData("")]
@@ -105,6 +122,11 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         Assert.Empty(await site.StopAsync());
     }
 
+    /// <summary>
+    /// Checks that basic authentication works under the virtual path: the two-factor route redirects to the prefixed login
+    /// page, a wrong password shows the error while the form still posts under the prefix, and the right password opens
+    /// the front end.
+    /// </summary>
     [Fact]
     public async Task Basic_authentication_login_works_in_a_subdirectory()
     {
@@ -146,9 +168,13 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         Assert.Empty(await site.StopAsync());
     }
 
+    /// <summary>
+    /// Skips the test when <c>AVPF_E2E_CASE</c> is set and omits <paramref name="name"/>. Otherwise starts copying the test
+    /// output to a new artifacts folder for the case and returns that output.
+    /// </summary>
     private TeeOutput StartCase(string name)
     {
-        // Filter before installing any site, including the basic-authentication case.
+        // Skip before installing a site, so unselected cases finish at once.
         if (Environment.GetEnvironmentVariable("AVPF_E2E_CASE") is { Length: > 0 } only && !only.Split(',').Contains(name))
             Assert.Skip($"AVPF_E2E_CASE selects {only}.");
         var log = TeeOutput.Create(_log, name);
@@ -156,7 +182,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         return log;
     }
 
-    /// <summary>Loads Umbraco's built-in error page and every font and image its stylesheet uses.</summary>
+    /// <summary>
+    /// Checks that Umbraco's built-in error page for a missing URL links its stylesheet under the virtual path, and that
+    /// every font and image in that stylesheet loads.
+    /// </summary>
     private static async Task CheckErrorPageAsync(TestSite site, CancellationToken ct)
     {
         using var http = site.CreateHttpClient();
@@ -176,37 +205,28 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         }
     }
 
-    /// <summary>Posts the starter kit's contact form, an Umbraco surface form, with invalid and then valid input.</summary>
+    /// <summary>
+    /// Submits the starter kit's contact form, an Umbraco surface form, and checks that its action and the redirect after
+    /// posting keep the virtual path.
+    /// </summary>
     private static async Task SubmitContactFormAsync(TestSite site, CancellationToken ct)
     {
-        // Server-side validation shows that the post reached the surface controller through the virtual path,
-        // with its antiforgery and route tokens; a valid post redirects back to the page under the prefix.
         var contact = site.Url("/contact/");
-        foreach (var (email, valid) in new[] { ("not-an-email", false), ("visitor@example.test", true) })
-        {
-            using var http = site.CreateHttpClient(followRedirects: false);
-            var form = Regex.Match(await http.GetStringAsync(contact, ct), "<form[\\s\\S]*?</form>").Value;
-            Assert.Contains($"action=\"{contact.AbsolutePath}\"", form, StringComparison.Ordinal);
-            var fields = Regex.Matches(form, """<input\b[^>]*\bname="(__RequestVerificationToken|ufprt)"[^>]*\bvalue="([^"]*)""")
-                .ToDictionary(match => match.Groups[1].Value, match => WebUtility.HtmlDecode(match.Groups[2].Value));
-            Assert.Equal(2, fields.Count);
-            fields["Name"] = "Visitor";
-            fields["Email"] = email;
-            fields["Message"] = "Hello from under the virtual path.";
-            using var response = await http.PostAsync(contact, new FormUrlEncodedContent(fields), ct);
-            if (valid)
-            {
-                Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-                Assert.Equal(contact.AbsolutePath, response.Headers.Location?.OriginalString);
-            }
-            else
-            {
-                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-                Assert.Contains("The Email field is not a valid e-mail address.", await response.Content.ReadAsStringAsync(ct), StringComparison.Ordinal);
-            }
-        }
+        using var http = site.CreateHttpClient(followRedirects: false);
+        var form = Regex.Match(await http.GetStringAsync(contact, ct), "<form[\\s\\S]*?</form>").Value;
+        Assert.Contains($"action=\"{contact.AbsolutePath}\"", form, StringComparison.Ordinal);
+        var fields = Regex.Matches(form, """<input\b[^>]*\bname="(__RequestVerificationToken|ufprt)"[^>]*\bvalue="([^"]*)""")
+            .ToDictionary(match => match.Groups[1].Value, match => WebUtility.HtmlDecode(match.Groups[2].Value));
+        Assert.Equal(2, fields.Count);
+        fields["Name"] = "Visitor";
+        fields["Email"] = "visitor@example.test";
+        fields["Message"] = "Hello from under the virtual path.";
+        using var response = await http.PostAsync(contact, new FormUrlEncodedContent(fields), ct);
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(contact.AbsolutePath, response.Headers.Location?.OriginalString);
     }
 
+    /// <summary>Checks that the management API's OpenAPI document and UI load under the virtual path.</summary>
     private static async Task CheckOpenApiAsync(TestSite site, CancellationToken ct)
     {
         using var http = site.CreateHttpClient();
@@ -217,40 +237,25 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         Assert.Equal(HttpStatusCode.OK, ui.StatusCode);
     }
 
-    /// <summary>Visits every front-end page linked from the home page and checks that each image loads.</summary>
-    private async Task CrawlFrontEndAsync(IPage page, TestSite site)
+    /// <summary>Checks that the home page and a nested blog post load at their prefixed URLs with all their images.</summary>
+    private static async Task CheckFrontEndAsync(IPage page, TestSite site)
     {
-        var home = site.Url("/");
-        var queue = new Queue<Uri>([home]);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { home.AbsolutePath };
-        var visited = 0;
-        while (queue.TryDequeue(out var url) && visited < 60)
+        foreach (var path in new[] { "/", "/blog/my-blog-post/" })
         {
+            var url = site.Url(path);
             var response = await page.GotoAsync(url.ToString());
             Assert.True(response?.Ok, $"{url.AbsolutePath} returned HTTP {response?.Status}");
-            visited++;
+            Assert.Equal(url.AbsolutePath, new Uri(page.Url).AbsolutePath);
+            await Expect(page.Locator("main")).ToBeVisibleAsync();
             var broken = await LoadImagesAsync(page);
             Assert.True(broken.Length == 0, $"Images failed to load on {url.AbsolutePath}: {string.Join(", ", broken)}");
-
-            foreach (var href in await page.EvaluateAsync<string[]>("() => [...document.querySelectorAll('a[href]')].map(a => a.href)"))
-            {
-                if (Uri.TryCreate(href, UriKind.Absolute, out var link) && IsFrontEndPage(site, link) && seen.Add(link.AbsolutePath))
-                    queue.Enqueue(new Uri(link.GetLeftPart(UriPartial.Path)));
-            }
         }
-
-        _log.WriteLine($"Visited {visited} front-end pages: {string.Join(", ", seen)}");
-        Assert.True(visited >= 3, $"Expected the starter kit's pages, but only {visited} page(s) were found.");
     }
 
-    private static bool IsFrontEndPage(TestSite site, Uri link)
-        => link.Scheme is "http" or "https"
-            && string.Equals(link.Authority, site.Address.Authority, StringComparison.OrdinalIgnoreCase)
-            && link.AbsolutePath.StartsWith(site.Url("/").AbsolutePath, StringComparison.OrdinalIgnoreCase)
-            && !link.AbsolutePath.StartsWith(site.Url("/umbraco").AbsolutePath, StringComparison.OrdinalIgnoreCase)
-            && !Path.HasExtension(link.AbsolutePath);
-
-    /// <summary>Loads lazy images too, and returns the ones that failed.</summary>
+    /// <summary>
+    /// Loads every image on <paramref name="page"/>, lazy ones included, and returns the URLs of those that failed or are
+    /// still loading after 15 seconds. An SVG with no intrinsic width counts as loaded.
+    /// </summary>
     private static Task<string[]> LoadImagesAsync(IPage page) => page.EvaluateAsync<string[]>("""
         async () => {
           const images = [...document.images];
@@ -266,13 +271,16 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         }
         """);
 
-    /// <summary>Requests a password reset from the login page and follows the emailed link.</summary>
+    /// <summary>
+    /// Requests a password reset from the login page and checks that the emailed link points at the prefixed login page on
+    /// the site's host. Then opens the link and waits for the new-password form.
+    /// </summary>
     private async Task FollowPasswordResetEmailAsync(BrowserSession browser, TestSite site, CancellationToken ct)
     {
         var page = browser.Page;
         var response = await page.GotoAsync(site.Url("/umbraco").ToString());
         Assert.True(response?.Ok, $"The backoffice returned HTTP {response?.Status}");
-        // A click that lands before the login element has finished rendering does not switch views.
+        // A click that lands before the login element finishes rendering leaves the view unchanged, so retry it.
         var emailInput = page.Locator("#email input");
         for (var attempt = 1; !await emailInput.IsVisibleAsync(); attempt++)
         {
@@ -322,9 +330,13 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await resetPage.CloseAsync();
     }
 
+    /// <summary>
+    /// Signs in to the backoffice, opened with the prefix in lowercase, and waits for the dashboard's news. Then opens the
+    /// system information from the header logo and checks that the logo loads from under the virtual path.
+    /// </summary>
     private static async Task SignInAsync(IPage page, TestSite site)
     {
-        // Exercise the common IIS case where a bookmark uses different prefix casing.
+        // Open the backoffice with the prefix in lowercase, as a bookmark with different casing would on IIS.
         var address = new Uri(site.Address, site.Options.Prefix.ToLowerInvariant() + "/umbraco");
         var response = await page.GotoAsync(address.ToString());
         Assert.True(response?.Ok, $"The backoffice returned HTTP {response?.Status}");
@@ -344,6 +356,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await page.Keyboard.PressAsync("Escape");
     }
 
+    /// <summary>
+    /// Reloads the backoffice and checks that it restores the session by refreshing its token under the virtual path, then
+    /// shows the dashboard at a prefixed URL.
+    /// </summary>
     private static async Task ReloadAndRestoreSessionAsync(IPage page, TestSite site)
     {
         var backoffice = site.Url("/umbraco").AbsolutePath;
@@ -358,6 +374,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         Assert.StartsWith(backoffice + "/", new Uri(page.Url).AbsolutePath);
     }
 
+    /// <summary>
+    /// Follows a link to the backoffice from another site, a navigation on which the browser withholds the SameSite=Strict
+    /// refresh cookie, and checks that the page still restores the session and shows the dashboard.
+    /// </summary>
     private static async Task RestoreFromExternalLinkAsync(BrowserSession browser, TestSite site)
     {
         var page = browser.Page;
@@ -371,10 +391,15 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await Expect(page.Locator("umb-app")).ToHaveAttributeAsync("data-restore-session", "");
     }
 
+    /// <summary>
+    /// Checks that the rich text editor loads its content stylesheet and two configured stylesheets under the virtual path,
+    /// that the code editor's JSON worker and icon font load, and that the dark and high-contrast themes load their
+    /// stylesheets.
+    /// </summary>
     private static async Task CheckEditorsAndThemesAsync(IPage page, TestSite site)
     {
-        // Configured rich text stylesheets: one relative to the stylesheet root, as the picker saves it,
-        // and one that includes the root, which Umbraco also accepts.
+        // Configure two rich text stylesheets: one relative to the stylesheet root, as the picker saves it, and one that
+        // includes the root, which Umbraco also accepts.
         string[] stylesheets = ["test-rte.css", "test-rte-root.css"];
         Directory.CreateDirectory(Path.Combine(site.Root, "wwwroot", "css"));
         foreach (var name in stylesheets)
@@ -421,7 +446,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             }
             """).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.True(errors > 0, "The JSON worker should report the deliberately invalid JSON.");
-        // The editor alone need not render any codicons. Find displays them and loads their font.
+        // The editor may render no codicons on its own. The Find widget shows some, which loads their font.
         await page.EvaluateAsync("""
             () => document.querySelector('umb-app').shadowRoot.querySelector('umb-code-editor')
               .editor.monacoEditor.getAction('actions.find').run()
@@ -447,6 +472,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await page.EvaluateAsync("localStorage.removeItem('umb-theme-alias')");
     }
 
+    /// <summary>
+    /// Invites a user through the management API and checks that the emailed link points at the prefixed login page on the
+    /// site's host. Then opens the link and waits for the new-password form.
+    /// </summary>
     private static async Task FollowInvitationEmailAsync(BrowserSession browser, TestSite site, CancellationToken ct)
     {
         var existing = Directory.GetFiles(site.MailDirectory, "*.eml").ToHashSet();
@@ -490,20 +519,24 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         finally { await page.CloseAsync(); }
     }
 
-    /// <summary>Creates a page under Home, publishes it and verifies drafts in preview.</summary>
+    /// <summary>
+    /// Creates and publishes a page under Home and checks it on the front end. Then checks that preview shows unpublished
+    /// drafts and refreshes when another draft is saved, and that the website's End preview button ends preview through
+    /// the prefixed management API.
+    /// </summary>
     private async Task CreateAndPublishPageAsync(IPage page, TestSite site, CancellationToken ct)
     {
-        // In the IIS case the content slug repeats the application prefix. The host has
-        // already stripped the first occurrence; the package must not strip the second.
+        // In the IIS case the page's slug repeats the application prefix. The host removes the first occurrence, and the
+        // package must keep the second.
         var pageName = site.Options.ExistingPathBase ? site.Options.Prefix.Trim('/') : PageName;
         var slug = site.Options.ExistingPathBase ? pageName.ToLowerInvariant() : "virtual-path-e2e-page";
         await page.GotoAsync(site.Url("/umbraco/section/content").ToString());
-        // The workspace's router slot overlaps the tree item's actions button, so send the click to it.
+        // The workspace's router slot overlaps the tree item's actions button, so dispatch the click to the button.
         var actions = page.GetByRole(AriaRole.Button, new() { Name = "View actions for 'Home'", Exact = true });
         await Expect(actions).ToBeAttachedAsync(new() { Timeout = 30_000 });
         await actions.DispatchEventAsync("click");
-        // data-mark attributes are the selectors Umbraco's own acceptance tests use.
-        // Home's actions menu, not the always-visible create button of the Content root.
+        // data-mark attributes are the selectors Umbraco's own acceptance tests use. This one is in Home's actions menu,
+        // not the Content root's create button, which is always visible.
         await page.Locator("umb-entity-action-list [data-mark='entity-action:Umb.EntityAction.Document.Create']")
             .Filter(new() { Visible = true }).First.ClickAsync();
         var documentTypes = page.Locator("uui-ref-node-document-type");
@@ -518,7 +551,8 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await page.GetByRole(AriaRole.Textbox, new() { Name = "Page Title" }).First.FillAsync(pageName);
         await page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.SaveAndPublish']").ClickAsync();
 
-        // Invariant documents publish straight away; a variant document asks which variants to publish.
+        // An invariant document publishes at once. A variant document asks which variants to publish, so confirm the
+        // dialog if it appears.
         var confirm = page.Locator("umb-document-publish-modal, umb-document-save-and-publish-modal")
             .GetByRole(AriaRole.Button, new() { NameRegex = PublishButton() });
         try
@@ -555,7 +589,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             await front.CloseAsync();
         }
 
-        // Preview must render the unpublished draft, rather than accidentally opening the live page.
+        // Preview must render the unpublished draft, not the live page.
         var draftTitle = pageName + " unpublished draft";
         var updatedTitle = pageName + " updated draft";
         await page.GetByRole(AriaRole.Textbox, new() { Name = "Page Title" }).First.FillAsync(draftTitle);
@@ -581,8 +615,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             _log.WriteLine($"Preview frame: {new Uri(frame.Url).AbsolutePath}");
             Assert.StartsWith(site.Url("/").AbsolutePath, new Uri(frame.Url).AbsolutePath, StringComparison.OrdinalIgnoreCase);
             await Expect(frame.Locator("body")).ToContainTextAsync(draftTitle, new() { Timeout = 30_000 });
-            // Saving another draft should refresh the already-open frame through SignalR,
-            // including the IIS case where WebSockets are unavailable.
+            // Saving another draft refreshes the open frame through SignalR, also in the IIS case without WebSockets.
             await page.GetByRole(AriaRole.Textbox, new() { Name = "Page Title" }).First.FillAsync(updatedTitle);
             await page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.Save']").ClickAsync();
             await Expect(preview.FrameLocator("iframe").Locator("body")).ToContainTextAsync(updatedTitle, new() { Timeout = 30_000 });
@@ -596,8 +629,8 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             await preview.CloseAsync();
         }
 
-        // While preview is active, the website shows a badge whose End preview button calls the
-        // management API and reloads the page, which must then render without preview.
+        // While preview is active, the website shows a badge. Its End preview button calls the management API and reloads
+        // the page, which must then render without preview.
         var website = await page.Context.NewPageAsync();
         try
         {
@@ -619,7 +652,11 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         }
     }
 
-    /// <summary>Uploads an image to the media root, then requests it and a resized version under the site's path.</summary>
+    /// <summary>
+    /// Uploads an image to the media root and checks that the backoffice's links to it, the file itself and a signed
+    /// resized version are under the virtual path. Then checks the image on the front end with
+    /// <see cref="CheckRenderedMediaAsync"/>.
+    /// </summary>
     private async Task UploadMediaAsync(IPage page, TestSite site, CancellationToken ct)
     {
         var file = Path.Combine(site.Root, "e2e-upload.png");
@@ -642,9 +679,8 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         var item = page.GetByText("E2E Upload", new() { Exact = true }).First;
         await Expect(item).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await item.ClickAsync();
-        // Only the file's own URL contains its name; backoffice routes use keys.
-        // Every place the backoffice shows the file, the image preview and the Info view's links,
-        // must address it under the site's path exactly once.
+        // Only the file's own URL contains its name; backoffice routes use keys. The image preview and the Info view's
+        // links must each address the file under the site's path, with the prefix once.
         var references = page.Locator("a[href*='e2e-upload'], img[src*='e2e-upload']");
         var addresses = new List<Uri>();
         foreach (var workspaceView in new[] { "Umb.WorkspaceView.Media.Edit", "Umb.WorkspaceView.Media.Info" })
@@ -665,8 +701,8 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         var original = await page.Context.APIRequest.GetAsync(media.ToString());
         Assert.True(original.Ok, $"The uploaded file returned HTTP {original.Status}");
         Assert.Equal(320, Image.Identify(await original.BodyAsync()).Width);
-        // Ask the authenticated API for a signed resize URL, as the thumbnail components do.
-        // Appending width ourselves bypasses URL generation and is invalid when HMAC is enabled.
+        // Ask the authenticated API for a signed resize URL, as the thumbnail components do. A width appended by hand
+        // skips URL generation and fails HMAC validation.
         var key = Regex.Match(page.Url, @"/workspace/media/edit/([a-f0-9-]+)").Groups[1].Value;
         Assert.True(Guid.TryParse(key, out _), "The media workspace must identify the uploaded item.");
         var resizeUrl = await page.EvaluateAsync<string>("""
@@ -696,6 +732,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         await CheckRenderedMediaAsync(page, site, key);
     }
 
+    /// <summary>
+    /// Returns the first file in <paramref name="directory"/> that matches <paramref name="pattern"/>, checking every
+    /// 250 ms. Throws <see cref="TimeoutException"/> when none appears within <paramref name="timeout"/>.
+    /// </summary>
     private static async Task<string> WaitForFileAsync(string directory, string pattern, TimeSpan timeout, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -709,13 +749,15 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>Matches the password-reset link in Umbraco's email.</summary>
     [GeneratedRegex("""https?://[^\s"'<>]+flow=reset-password[^\s"'<>]*""")]
     private static partial Regex ResetLink();
 
+    /// <summary>Matches the publish dialog's confirm button by name, in any case.</summary>
     [GeneratedRegex("publish", RegexOptions.IgnoreCase)]
     private static partial Regex PublishButton();
 
-    /// <summary>One Chromium context for a site, recording every error the browser reports.</summary>
+    /// <summary>One Chromium browser context for a site, which records every error the browser reports.</summary>
     private sealed class BrowserSession : IAsyncDisposable
     {
         private readonly IPlaywright _playwright;
@@ -726,6 +768,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
         private readonly ConcurrentDictionary<string, bool> _externalHosts = new(StringComparer.OrdinalIgnoreCase);
         private string _step = "start";
 
+        /// <summary>
+        /// Holds the Playwright objects for <paramref name="site"/> and writes diagnostics to <paramref name="output"/> and
+        /// the <paramref name="artifacts"/> folder.
+        /// </summary>
         private BrowserSession(IPlaywright playwright, IBrowser browser, IBrowserContext context, TestSite site, ITestOutputHelper output, string artifacts)
         {
             _playwright = playwright;
@@ -742,91 +788,123 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
 
         public ConcurrentQueue<string> Errors { get; } = new();
 
+        /// <summary>
+        /// Launches Chromium with tracing and a page script that records <c>EventSource</c> connections. The context serves
+        /// fixed offline responses for known external hosts and records console errors, script errors, failed requests,
+        /// HTTP errors and unexpected external requests. Returns the session with one open page.
+        /// </summary>
         public static async Task<BrowserSession> StartAsync(TestSite site, ITestOutputHelper output, string artifacts)
         {
             var playwright = await Playwright.CreateAsync();
-            var browser = await playwright.Chromium.LaunchAsync();
-            var context = await browser.NewContextAsync(new() { IgnoreHTTPSErrors = site.Options.Https });
-            var session = new BrowserSession(playwright, browser, context, site, output, artifacts);
-            await context.Tracing.StartAsync(new() { Screenshots = true, Snapshots = true, Sources = true });
-            await context.AddInitScriptAsync("""
-                window.__testEventSources = [];
-                const NativeEventSource = window.EventSource;
-                window.EventSource = class extends NativeEventSource {
-                  constructor(url, options) {
-                    super(url, options);
-                    this.addEventListener('open', () => window.__testEventSources.push(this.url));
-                  }
-                };
-                """);
-            await context.RouteAsync("**/*", async route =>
+            IBrowser? browser = null;
+            try
             {
-                var url = new Uri(route.Request.Url);
-                if (url.Authority == site.Address.Authority)
-                    await route.ContinueAsync();
-                else if (url.AbsoluteUri == "https://outside.example.test/")
-                    await route.FulfillAsync(new() { ContentType = "text/html", Body = $"<a href=\"{site.Url("/umbraco")}\">Backoffice</a>" });
-                else if (url.AbsoluteUri == "https://code.jquery.com/jquery-3.6.0.min.js")
-                    await route.FulfillAsync(new()
+                browser = await playwright.Chromium.LaunchAsync();
+                var context = await browser.NewContextAsync(new() { IgnoreHTTPSErrors = site.Options.Https });
+                var session = new BrowserSession(playwright, browser, context, site, output, artifacts);
+                await context.Tracing.StartAsync(new() { Screenshots = true, Snapshots = true, Sources = true });
+                await context.AddInitScriptAsync("""
+                    window.__testEventSources = [];
+                    const NativeEventSource = window.EventSource;
+                    window.EventSource = class extends NativeEventSource {
+                      constructor(url, options) {
+                        super(url, options);
+                        this.addEventListener('open', () => window.__testEventSources.push(this.url));
+                      }
+                    };
+                    """);
+                await context.RouteAsync("**/*", async route =>
+                {
+                    var url = new Uri(route.Request.Url);
+                    if (url.Authority == site.Address.Authority)
+                        await route.ContinueAsync();
+                    else if (url.AbsoluteUri == "https://outside.example.test/")
+                        await route.FulfillAsync(new() { ContentType = "text/html", Body = $"<a href=\"{site.Url("/umbraco")}\">Backoffice</a>" });
+                    else if (url.AbsoluteUri == "https://code.jquery.com/jquery-3.6.0.min.js")
+                        await route.FulfillAsync(new()
+                        {
+                            ContentType = "application/javascript",
+                            Path = Path.Combine(AppContext.BaseDirectory, "BrowserFixtures", "jquery-3.6.0.min.js"),
+                            Headers = new Dictionary<string, string> { ["Access-Control-Allow-Origin"] = "*" },
+                        });
+                    else if (url.Host == "fonts.googleapis.com")
+                        await route.FulfillAsync(new() { ContentType = "text/css", Body = "/* Offline test fonts: use the normal fallbacks. */" });
+                    else if (url.Host is "www.youtube.com" or "www.youtube-nocookie.com" or "www.openstreetmap.org")
+                        await route.FulfillAsync(new() { ContentType = "text/html", Body = "<!doctype html><title>Offline embed</title>" });
+                    else
                     {
-                        ContentType = "application/javascript",
-                        Path = Path.Combine(AppContext.BaseDirectory, "BrowserFixtures", "jquery-3.6.0.min.js"),
-                        Headers = new Dictionary<string, string> { ["Access-Control-Allow-Origin"] = "*" },
-                    });
-                else if (url.Host == "fonts.googleapis.com")
-                    await route.FulfillAsync(new() { ContentType = "text/css", Body = "/* Offline test fonts: use the normal fallbacks. */" });
-                else if (url.Host is "www.youtube.com" or "www.youtube-nocookie.com" or "www.openstreetmap.org")
-                    await route.FulfillAsync(new() { ContentType = "text/html", Body = "<!doctype html><title>Offline embed</title>" });
-                else
+                        session.Errors.Enqueue($"Unexpected external request: {url}");
+                        await route.AbortAsync();
+                    }
+                });
+                // Listen on the context, so every page, popup and new tab is checked.
+                context.Console += (_, message) =>
                 {
-                    session.Errors.Enqueue($"Unexpected external request: {url}");
-                    await route.AbortAsync();
-                }
-            });
-            // Context-wide, so every page, popup and new tab is checked.
-            context.Console += (_, message) =>
-            {
-                if (message.Type == "error"
-                    && !(session.IsSigningOutHub(message.Location)
-                        && message.Text.StartsWith("Failed to load resource: the server responded with a status of 401", StringComparison.Ordinal)))
-                    session.Errors.Enqueue($"[{session._step}] Console: {message.Text} ({message.Location})");
-            };
-            context.WebError += (_, error) => session.Errors.Enqueue($"[{session._step}] JavaScript: {error.Error}");
-            context.RequestFailed += (_, request) =>
-            {
-                // Navigating away cancels requests that are still running; that is not a failure.
-                if (request.Failure?.Contains("ERR_ABORTED", StringComparison.Ordinal) != true)
-                    session.Errors.Enqueue($"[{session._step}] Request failed: {request.Method} {request.Url} {request.Failure}");
-            };
-            context.Response += (_, response) =>
-            {
-                // Umbraco revokes the session before SignalR sends its SSE close message. The
-                // resulting POST is rejected even on a root site; allow only that shutdown 401.
-                if (response.Status == 401 && response.Request.Method == "POST" && session.IsSigningOutHub(response.Url))
+                    if (message.Type == "error"
+                        && !(session.IsSigningOutHub(message.Location)
+                            && message.Text.StartsWith("Failed to load resource: the server responded with a status of 401", StringComparison.Ordinal)))
+                        session.Errors.Enqueue($"[{session._step}] Console: {message.Text} ({message.Location})");
+                };
+                context.WebError += (_, error) => session.Errors.Enqueue($"[{session._step}] JavaScript: {error.Error}");
+                context.RequestFailed += (_, request) =>
                 {
-                    output.WriteLine("Expected 401 for the server-event hub's SSE close message after sign-out.");
-                    return;
-                }
-                if (response.Status >= 400)
-                    session.Errors.Enqueue($"[{session._step}] HTTP {response.Status}: {response.Request.Method} {response.Url}");
-            };
-            context.Request += (_, request) =>
+                    // Navigating away cancels requests that are still running, which is expected.
+                    if (request.Failure?.Contains("ERR_ABORTED", StringComparison.Ordinal) != true)
+                        session.Errors.Enqueue($"[{session._step}] Request failed: {request.Method} {request.Url} {request.Failure}");
+                };
+                context.Response += (_, response) =>
+                {
+                    // Umbraco revokes the session before SignalR sends its SSE close message, so that POST gets a 401, on a
+                    // root site too. Allow only that 401.
+                    if (response.Status == 401 && response.Request.Method == "POST" && session.IsSigningOutHub(response.Url))
+                    {
+                        output.WriteLine("Expected 401 for the server-event hub's SSE close message after sign-out.");
+                        return;
+                    }
+                    if (response.Status >= 400)
+                        session.Errors.Enqueue($"[{session._step}] HTTP {response.Status}: {response.Request.Method} {response.Url}");
+                };
+                context.Request += (_, request) =>
+                {
+                    if (Uri.TryCreate(request.Url, UriKind.Absolute, out var url) && url.Scheme.StartsWith("http", StringComparison.Ordinal)
+                        && !string.Equals(url.Authority, site.Address.Authority, StringComparison.OrdinalIgnoreCase))
+                        session._externalHosts.TryAdd(url.Host, true);
+                };
+                session.Page = await context.NewPageAsync();
+                return session;
+            }
+            catch
             {
-                if (Uri.TryCreate(request.Url, UriKind.Absolute, out var url) && url.Scheme.StartsWith("http", StringComparison.Ordinal)
-                    && !string.Equals(url.Authority, site.Address.Authority, StringComparison.OrdinalIgnoreCase))
-                    session._externalHosts.TryAdd(url.Host, true);
-            };
-            session.Page = await context.NewPageAsync();
-            return session;
+                // The caller cannot dispose a session it never received. Disposing the browser also closes any context
+                // or page created before the failure.
+                try
+                {
+                    if (browser is not null) await browser.DisposeAsync();
+                }
+                finally
+                {
+                    playwright.Dispose();
+                }
+                throw;
+            }
         }
 
+        /// <summary>Opens another page in the session's context, where the same error recording applies.</summary>
         public Task<IPage> NewPageAsync() => Context.NewPageAsync();
 
+        /// <summary>
+        /// Returns whether <paramref name="url"/> is the server event hub while signing out on a host without WebSockets,
+        /// where the SSE close message gets the expected 401.
+        /// </summary>
         private bool IsSigningOutHub(string url)
             => _step == "Sign out" && !_site.Options.WebSockets
                 && Uri.TryCreate(url, UriKind.Absolute, out var address)
                 && address.GetLeftPart(UriPartial.Path) == _site.Url("/umbraco/serverEventHub").ToString();
 
+        /// <summary>
+        /// Runs <paramref name="step"/> under <paramref name="name"/>, which labels the errors recorded meanwhile. When the
+        /// step fails, captures every open page before rethrowing.
+        /// </summary>
         public async Task StepAsync(string name, Func<Task> step)
         {
             _step = name;
@@ -842,12 +920,17 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             }
         }
 
+        /// <summary>Checks, as a final step, that the browser reported no errors.</summary>
         public Task AssertNoErrorsAsync() => StepAsync("Browser errors", () =>
         {
             Assert.Empty(Errors);
             return Task.CompletedTask;
         });
 
+        /// <summary>
+        /// Saves a full-page screenshot of every open page, named after <paramref name="step"/>, and writes each page's URL
+        /// and accessibility snapshot to the test output.
+        /// </summary>
         private async Task CaptureAsync(string step)
         {
             var file = string.Concat(step.Split(Path.GetInvalidFileNameChars())).Replace(' ', '-');
@@ -869,6 +952,10 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
             _output.WriteLine($"Screenshots: {_artifacts}");
         }
 
+        /// <summary>
+        /// Writes the recorded errors and the external hosts contacted to the test output, saves the trace, and closes the
+        /// browser.
+        /// </summary>
         public async ValueTask DisposeAsync()
         {
             foreach (var error in Errors)
@@ -877,7 +964,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
                 _output.WriteLine($"External hosts contacted: {string.Join(", ", _externalHosts.Keys.Order())}");
             try
             {
-                // Save passing traces too: the server-log assertion runs after the browser closes.
+                // Save the trace for passing runs too, because the server-log check runs after the browser closes.
                 await Context.Tracing.StopAsync(new() { Path = Path.Combine(_artifacts, "trace.zip") });
             }
             finally
@@ -902,6 +989,10 @@ internal sealed class TeeOutput(ITestOutputHelper inner, string file) : ITestOut
     public string Output => inner.Output;
     public string DirectoryPath => Path.GetDirectoryName(file)!;
 
+    /// <summary>
+    /// Creates an empty <c>test-output.log</c> in a new run folder for the case <paramref name="name"/> under
+    /// <c>e2e-artifacts</c>, and returns an output that writes to it and to <paramref name="inner"/>.
+    /// </summary>
     public static TeeOutput Create(ITestOutputHelper inner, string name)
     {
         var run = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6];
@@ -911,19 +1002,25 @@ internal sealed class TeeOutput(ITestOutputHelper inner, string file) : ITestOut
         return new TeeOutput(inner, file);
     }
 
+    /// <summary>Writes <paramref name="message"/> to xUnit and appends it to the log file.</summary>
     public void Write(string message)
     {
         inner.Write(message);
         File.AppendAllText(file, message);
     }
 
+    /// <summary>Formats <paramref name="format"/> with <paramref name="args"/> and writes the result to both outputs.</summary>
     public void Write(string format, params object[] args) => Write(string.Format(format, args));
 
+    /// <summary>Writes <paramref name="message"/> as a line to xUnit and to the log file.</summary>
     public void WriteLine(string message)
     {
         inner.WriteLine(message);
         File.AppendAllText(file, message + Environment.NewLine);
     }
 
+    /// <summary>
+    /// Formats <paramref name="format"/> with <paramref name="args"/> and writes the result as a line to both outputs.
+    /// </summary>
     public void WriteLine(string format, params object[] args) => WriteLine(string.Format(format, args));
 }

@@ -13,6 +13,11 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
 public sealed partial class SiteEndToEndTests
 {
+    /// <summary>
+    /// Checks that the block grid loads its default and a custom layout stylesheet under the virtual path, and that block
+    /// thumbnails load in the block catalogue and on the data type's block type cards. Saves the custom stylesheet and
+    /// thumbnails through the management API and restores the data type afterwards.
+    /// </summary>
     private static async Task CheckBlockGridAsync(IPage page, TestSite site)
     {
         var home = site.Services.GetRequiredService<IContentService>().GetRootContent().Single(content => content.ContentType.Alias == "home");
@@ -25,8 +30,8 @@ public sealed partial class SiteEndToEndTests
         Assert.StartsWith(site.Url("/umbraco/backoffice/").AbsolutePath, new Uri(stylesheet.Url).AbsolutePath);
         await Expect(page.Locator("umb-property-editor-ui-block-grid")).ToBeVisibleAsync();
 
-        // Persist the settings through the same authenticated API as the data-type editor. Thumbnails
-        // are saved as the static file picker saves them, including the web root folder.
+        // Save the settings through the authenticated API that the data type editor uses. The thumbnails use the format
+        // the static file picker saves, which includes the web root folder.
         Directory.CreateDirectory(Path.Combine(site.Root, "wwwroot", "css"));
         await File.WriteAllTextAsync(Path.Combine(site.Root, "wwwroot", "css", "test-grid.css"),
             ".umb-block-grid { --test-layout-stylesheet: loaded; }", TestContext.Current.CancellationToken);
@@ -82,11 +87,15 @@ public sealed partial class SiteEndToEndTests
         }
     }
 
+    /// <summary>
+    /// Checks that the health check is registered once and that, run through the management API as the Health Check
+    /// dashboard runs it, it returns four successful results, one of them naming the site's prefix.
+    /// </summary>
     private static async Task CheckHealthAsync(IPage page, TestSite site)
     {
-        // Registered once, whether or not Umbraco's own type scan also finds it.
+        // The check appears once, whether or not Umbraco's own type scan also finds it.
         Assert.Single(site.Services.GetRequiredService<HealthCheckCollection>(), check => check is VirtualPathHealthCheck);
-        // Run as the backoffice's Health Check dashboard does.
+        // Run the Configuration group as the backoffice's Health Check dashboard does.
         var results = await page.EvaluateAsync<JsonElement>("""
             async id => {
               const { HealthCheckService } = await import('@umbraco-cms/backoffice/external/backend-api');
@@ -103,13 +112,20 @@ public sealed partial class SiteEndToEndTests
         Assert.Contains(statuses, status => status.Message.Contains($"runs under {site.Options.Prefix},", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Waits until <paramref name="image"/> has the source <paramref name="url"/>, then checks that the image decodes.
+    /// </summary>
     private static async Task AssertImageLoadsAsync(ILocator image, string url)
     {
         await Expect(image).ToHaveAttributeAsync("src", url, new() { Timeout = 30_000 });
-        // decode() rejects when the image cannot be loaded.
+        // decode() rejects when the image fails to load.
         await image.EvaluateAsync("image => image.decode()");
     }
 
+    /// <summary>
+    /// Checks that the backoffice's server context reports the site's public origin and prefix as its server URL. On a host
+    /// without WebSockets, also checks that the server event hub connects with Server-Sent Events.
+    /// </summary>
     private static async Task CheckServerContextAsync(IPage page, TestSite site)
     {
         var serverUrl = await page.EvaluateAsync<string>("""
@@ -123,13 +139,19 @@ public sealed partial class SiteEndToEndTests
             await AssertServerSentEventsAsync(page, "serverEventHub");
     }
 
+    /// <summary>
+    /// Checks that every patched backoffice module imports in the browser from the cache-busted assets path, that three
+    /// patched files answer conditional requests with 304, and that the login page's script version is the hash of the
+    /// patched script. Outside debug mode, also checks that backoffice assets are cacheable.
+    /// </summary>
     private static async Task CheckPatchedAssetsAsync(IPage page, TestSite site, CancellationToken ct)
     {
-        await using var assets = new AssetPatchTests.Assets();
+        var files = site.Services.GetRequiredService<IWebHostEnvironment>().WebRootFileProvider;
         var root = site.Services.GetRequiredService<IBackOfficePathGenerator>().BackOfficeAssetsPath;
-        var backOffice = BackOfficeAssetPatches.AssetsRoot + "/";
-        var paths = assets.PatchedPaths().Where(path => path.StartsWith(backOffice, StringComparison.Ordinal))
-            .Select(path => root + path[BackOfficeAssetPatches.AssetsRoot.Length..]).ToArray();
+        var backOffice = AssetPatcher.AssetsRoot + "/";
+        var paths = BackOfficeAssetPatches.Patches.Where(patch => patch.Path.StartsWith(backOffice, StringComparison.Ordinal))
+            .Select(patch => Assert.Single(AssetPatcher.Locate(files, patch)).Path)
+            .Select(path => root + path[AssetPatcher.AssetsRoot.Length..]).ToArray();
         Assert.Equal(BackOfficeAssetPatches.Patches.Count(patch => patch.Path.StartsWith(backOffice, StringComparison.Ordinal)), paths.Length);
         await page.EvaluateAsync("""
             async paths => {
@@ -157,7 +179,7 @@ public sealed partial class SiteEndToEndTests
             Assert.Empty(await cached.Content.ReadAsByteArrayAsync(ct));
         }
 
-        // The login view's existing asp-append-version must hash the file-provider output.
+        // The login view's asp-append-version must hash the patched file that the file provider serves.
         var loginHtml = await http.GetStringAsync(site.Url("/umbraco/login"), ct);
         var script = Regex.Match(loginHtml, """<script\b[^>]*\bsrc="([^"]*/umbraco/login/login\.js[^"]*)"[^>]*>""");
         Assert.True(script.Success, "The login page must include its versioned script.");
@@ -168,6 +190,10 @@ public sealed partial class SiteEndToEndTests
         Assert.Equal(WebEncoders.Base64UrlEncode(SHA256.HashData(scriptBytes)), query["v"].ToString());
     }
 
+    /// <summary>
+    /// Signs out through Umbraco's auth context and checks that the logout redirect stays under the virtual path. Then
+    /// checks that the backoffice shows the login form, also after a reload, and that the refresh cookie is gone.
+    /// </summary>
     private static async Task SignOutAsync(IPage page, TestSite site)
     {
         var logout = page.WaitForResponseAsync(response => response.Request.IsNavigationRequest
@@ -190,6 +216,10 @@ public sealed partial class SiteEndToEndTests
         Assert.DoesNotContain(await page.Context.CookiesAsync(), cookie => cookie.Name.Contains("umbRefreshToken", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Waits until <paramref name="page"/> has an open <c>EventSource</c> connection to the SignalR hub
+    /// <paramref name="hub"/>, as recorded by the browser session's page script.
+    /// </summary>
     private static async Task AssertServerSentEventsAsync(IPage page, string hub)
     {
         await page.WaitForFunctionAsync("""
@@ -197,6 +227,9 @@ public sealed partial class SiteEndToEndTests
             """, hub, new() { Timeout = 30_000 });
     }
 
+    /// <summary>
+    /// Checks that the Delivery API returns content routes and media URLs under the virtual path, with the prefix once.
+    /// </summary>
     private static async Task CheckDeliveryApiAsync(TestSite site, CancellationToken ct)
     {
         using var http = site.CreateHttpClient();
@@ -209,8 +242,8 @@ public sealed partial class SiteEndToEndTests
         {
             var path = item.GetProperty("route").GetProperty("path").GetString()!;
             Assert.StartsWith(site.Url("/").AbsolutePath, path, StringComparison.OrdinalIgnoreCase);
-            // This fixture deliberately gives the new page the same slug as the IIS prefix.
-            // Both segments must survive; a textual duplicate check would reject its valid URL.
+            // In the IIS case the fixture gives a new page the same slug as the prefix, so its valid URL repeats the
+            // prefix. Compare that URL exactly, because the doubled-prefix check would reject it.
             if (site.Options.ExistingPathBase && item.GetProperty("name").GetString() == site.Options.Prefix.Trim('/'))
                 Assert.Equal(site.Url(site.Options.Prefix.ToLowerInvariant() + "/").AbsolutePath, path);
             else
@@ -226,6 +259,11 @@ public sealed partial class SiteEndToEndTests
         }
     }
 
+    /// <summary>
+    /// Picks the uploaded media <paramref name="mediaKey"/> as the home page's hero image and publishes. Then checks that
+    /// the front end renders its original and signed crop URLs under the virtual path, and that both images load, the
+    /// crop at 100 by 60 pixels.
+    /// </summary>
     private static async Task CheckRenderedMediaAsync(IPage page, TestSite site, string mediaKey)
     {
         var home = site.Services.GetRequiredService<IContentService>().GetRootContent().Single(content => content.ContentType.Alias == "home");
@@ -242,7 +280,8 @@ public sealed partial class SiteEndToEndTests
         await Expect(picker.Locator("uui-card-media")).ToHaveAttributeAsync("name", "E2E Upload");
         await page.Locator("[data-mark='workspace-action:Umb.WorkspaceAction.Document.SaveAndPublish']").ClickAsync();
         await Expect(page.Locator("umb-document-publish-modal")).Not.ToBeAttachedAsync();
-        // Readback proves the picker saved the uploaded media, not the previously selected image.
+        // Reading the page and the saved value back confirms that the picker saved the uploaded media, not the previous
+        // image.
         using var http = site.CreateHttpClient();
         string html = "";
         for (var attempt = 0; attempt < 30; attempt++)
@@ -279,6 +318,10 @@ public sealed partial class SiteEndToEndTests
         finally { await front.CloseAsync(); }
     }
 
+    /// <summary>
+    /// Returns the <c>url</c> of every object in <paramref name="element"/>, at any depth, that also has a
+    /// <c>mediaType</c>.
+    /// </summary>
     private static IEnumerable<string> FindMediaUrls(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Object)
@@ -293,6 +336,7 @@ public sealed partial class SiteEndToEndTests
                 foreach (var found in FindMediaUrls(child)) yield return found;
     }
 
+    /// <summary>Checks that <paramref name="path"/> does not start with the site's prefix twice.</summary>
     private static void AssertNoDoubledPrefix(string path, TestSite site)
     {
         if (site.Options.Prefix.Length > 0)

@@ -6,11 +6,17 @@ using Umbraco.Cms.Web.Common.Hosting;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
+/// <summary>Checks the body Tag Helper component through ASP.NET Core's real <see cref="BodyTagHelper"/>.</summary>
 public sealed class BackOfficeBodyTests
 {
     private const string BackOfficeView = "/umbraco/UmbracoBackOffice/Index.cshtml";
     private const string AppHtml = "<umb-app lang=\"fr\" keep-user-logged-in>café</umb-app>";
 
+    /// <summary>
+    /// Checks that the backoffice page keeps its markup and gets no-store caching, and that under a virtual path it gets
+    /// HTML-encoded <c>data-path-base</c> and <c>backoffice-path</c> attributes. The page never contains the request's
+    /// host or a <c>server-url</c> attribute.
+    /// </summary>
     [Theory]
     [InlineData("")]
     [InlineData("/portal")]
@@ -40,6 +46,10 @@ public sealed class BackOfficeBodyTests
         Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
     }
 
+    /// <summary>
+    /// Checks that <c>data-restore-session</c> appears when the refresh cookie arrives, or with strict cookies when a
+    /// cross-site navigation may have withheld it, but not on an OAuth callback without the cookie.
+    /// </summary>
     [Theory]
     [InlineData(false, "none", false, false)]
     [InlineData(true, "same-origin", false, true)]
@@ -57,6 +67,10 @@ public sealed class BackOfficeBodyTests
         await AssertSessionHintAsync(context, restore);
     }
 
+    /// <summary>
+    /// Checks that the session hint looks for the refresh cookie under its configured name, with the <c>__Host-</c>
+    /// prefix over HTTPS.
+    /// </summary>
     [Theory]
     [InlineData(false, "umbRefreshTokentenant", true)]
     [InlineData(false, "umbRefreshToken", false)]
@@ -72,6 +86,10 @@ public sealed class BackOfficeBodyTests
         await AssertSessionHintAsync(context, restore);
     }
 
+    /// <summary>
+    /// Checks that with Lax or None cookies, a cross-site navigation restores the session only when the cookie arrives,
+    /// because browsers send those cookies on such navigations.
+    /// </summary>
     [Theory]
     [InlineData(SameSiteMode.Lax, false)]
     [InlineData(SameSiteMode.Lax, true)]
@@ -87,6 +105,10 @@ public sealed class BackOfficeBodyTests
         await AssertSessionHintAsync(context, cookie);
     }
 
+    /// <summary>
+    /// Checks that the basic-auth login and two-factor forms post under the virtual path once, keeping their fields and
+    /// query strings, and that a site at the root keeps its forms as they are.
+    /// </summary>
     [Theory]
     [InlineData("Login", "/portal")]
     [InlineData("TwoFactor", "/a/b")]
@@ -101,6 +123,10 @@ public sealed class BackOfficeBodyTests
         Assert.Equal(expected, await RenderBodyAsync(context, html, $"/umbraco/BasicAuthLogin/{view}.cshtml"));
     }
 
+    /// <summary>
+    /// Checks that the component ignores the backoffice page's head and the body of every other view, including
+    /// Umbraco's login page: it reads no content and sets no headers.
+    /// </summary>
     [Theory]
     [InlineData(BackOfficeView, "head")]
     [InlineData("/umbraco/UmbracoLogin/Index.cshtml", "body")]
@@ -116,6 +142,10 @@ public sealed class BackOfficeBodyTests
         Assert.Empty(context.Response.Headers);
     }
 
+    /// <summary>
+    /// Checks that the component builds on content another component already changed, and keeps the output's
+    /// pre-content and post-content.
+    /// </summary>
     [Fact]
     public async Task Existing_component_changes_are_preserved()
     {
@@ -132,6 +162,11 @@ public sealed class BackOfficeBodyTests
         Assert.Equal("<footer>After</footer>", output.PostContent.GetContent());
     }
 
+    /// <summary>
+    /// Renders the backoffice body for <paramref name="context"/> and checks that <c>data-restore-session</c> appears
+    /// exactly when <paramref name="restore"/> is <see langword="true"/>, that no cookie value enters the page, and that
+    /// the response is marked <c>no-store</c>.
+    /// </summary>
     private static async Task AssertSessionHintAsync(HttpContext context, bool restore)
     {
         var html = await RenderBodyAsync(context, AppHtml);
@@ -140,8 +175,15 @@ public sealed class BackOfficeBodyTests
         Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
     }
 
-    // Use the real BodyTagHelper, including DI and ViewContext property activation. The browser
-    // suite exercises Umbraco's compiled views; these checks need no server or custom Razor view.
+    /// <summary>
+    /// Runs <paramref name="html"/> through the body Tag Helper as the body of <paramref name="view"/> and returns the
+    /// resulting content.
+    /// </summary>
+    /// <remarks>
+    /// Uses ASP.NET Core's real <see cref="BodyTagHelper"/>, so the component comes from dependency injection and
+    /// receives its view context as it does in a view. The browser suite covers Umbraco's compiled views; these checks
+    /// need no server or Razor view of their own.
+    /// </remarks>
     internal static async Task<string> RenderBodyAsync(HttpContext context, string html, string view = BackOfficeView)
     {
         var output = new TagHelperOutput("body", [], (_, _) => Task.FromResult<TagHelperContent>(new DefaultTagHelperContent().SetHtmlContent(html)));
@@ -150,6 +192,9 @@ public sealed class BackOfficeBodyTests
         return output.Content.GetContent();
     }
 
+    /// <summary>
+    /// Runs <see cref="BodyTagHelper"/> over <paramref name="output"/> as if <paramref name="view"/> were rendering it.
+    /// </summary>
     private static async Task ProcessAsync(HttpContext context, string view, TagHelperOutput output)
     {
         var helper = new BodyTagHelper(context.RequestServices.GetRequiredService<ITagHelperComponentManager>(),
@@ -162,13 +207,18 @@ public sealed class BackOfficeBodyTests
         await helper.ProcessAsync(tagContext, output);
     }
 
+    /// <summary>
+    /// Builds the services the component needs: MVC's Tag Helper infrastructure, backoffice paths under
+    /// <paramref name="prefix"/>, and refresh-cookie settings with <paramref name="siteName"/> and
+    /// <paramref name="sameSite"/>.
+    /// </summary>
     private static ServiceProvider CreateServices(string prefix = "/portal", string siteName = "", SameSiteMode sameSite = SameSiteMode.Strict)
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddControllersWithViews();
         services.AddTransient<ITagHelperComponent, BackOfficeBodyTagHelperComponent>();
-        services.AddSingleton<IBackOfficePathGenerator>(new Paths(prefix));
+        services.AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths(prefix));
         services.Configure<GlobalSettings>(options => options.UseHttps = false);
 #pragma warning disable CS0618
         services.Configure<BackOfficeTokenCookieSettings>(options => { options.SameSite = sameSite.ToString(); options.SiteName = siteName; });
@@ -176,6 +226,9 @@ public sealed class BackOfficeBodyTests
         return services.BuildServiceProvider();
     }
 
+    /// <summary>
+    /// Creates an HTTP request for <c>/umbraco</c> on <c>site.test</c> with <paramref name="prefix"/> as its path base.
+    /// </summary>
     private static DefaultHttpContext CreateContext(IServiceProvider services, string prefix = "/portal")
     {
         var context = new DefaultHttpContext { RequestServices = services };
@@ -184,13 +237,5 @@ public sealed class BackOfficeBodyTests
         context.Request.PathBase = prefix;
         context.Request.Path = "/umbraco";
         return context;
-    }
-
-    private sealed class Paths(string prefix) : IBackOfficePathGenerator
-    {
-        public string BackOfficePath => prefix + "/umbraco";
-        public string BackOfficeVirtualDirectory => BackOfficePath + "/backoffice";
-        public string BackOfficeCacheBustHash => "hash";
-        public string BackOfficeAssetsPath => BackOfficeVirtualDirectory + "/" + BackOfficeCacheBustHash;
     }
 }

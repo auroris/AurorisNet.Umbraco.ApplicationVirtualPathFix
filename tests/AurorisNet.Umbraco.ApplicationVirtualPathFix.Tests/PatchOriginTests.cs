@@ -9,14 +9,20 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 /// </summary>
 public sealed class PatchOriginTests(AssetPatchTests.Assets assets) : IClassFixture<AssetPatchTests.Assets>
 {
+    /// <summary>The path of every patch, one test case each.</summary>
     public static TheoryData<string> Patches => new(BackOfficeAssetPatches.Patches.Select(patch => patch.Path));
 
+    /// <summary>
+    /// Checks that the patch for <paramref name="path"/> finds one file built from the source the patch names, and that
+    /// every match of each edit was generated from the source line the edit names. A hashed bundle must name a source,
+    /// and only a file without a source map may have edits that name no line.
+    /// </summary>
     [Theory]
     [MemberData(nameof(Patches))]
     public async Task Patch_changes_the_Umbraco_source_it_names(string path)
     {
         var patch = BackOfficeAssetPatches.Patches.Single(patch => patch.Path == path);
-        var files = BackOfficeAssetPatches.Locate(assets.Files, patch);
+        var files = AssetPatcher.Locate(assets.Files, patch);
         if (files.Length != 1)
             Assert.Fail($"Expected one Umbraco file for {path}, found {files.Length}. {await WhereSourcesAreAsync(patch)}");
         var (file, info) = files[0];
@@ -25,7 +31,7 @@ public sealed class PatchOriginTests(AssetPatchTests.Assets assets) : IClassFixt
 
         if (patch.Source is { } source && map?.Sources.Contains(source) != true)
             Assert.Fail($"{file} is no longer built from {source}. {await WhereSourcesAreAsync(patch)}");
-        if (map is not null && path.Contains(BackOfficeAssetPatches.HashPattern, StringComparison.Ordinal))
+        if (map is not null && path.Contains(AssetPatcher.HashPattern, StringComparison.Ordinal))
             Assert.True(patch.Source is not null || patch.Edits.Any(edit => edit.Origin is not null),
                 $"{path} must name a source, so that tests can find the bundle when Umbraco renames it.");
 
@@ -50,7 +56,10 @@ public sealed class PatchOriginTests(AssetPatchTests.Assets assets) : IClassFixt
         }
     }
 
-    /// <summary>The original lines that produced a match; without a map, the file is its own source.</summary>
+    /// <summary>
+    /// Returns the original lines that produced <paramref name="match"/>. Without a source map, the file is its own
+    /// source, so returns the generated lines the match spans.
+    /// </summary>
     private static IEnumerable<(string File, string Text)> CoveredLines(SourceMap? map, string file, string generated, Match match)
     {
         if (map is null)
@@ -65,8 +74,11 @@ public sealed class PatchOriginTests(AssetPatchTests.Assets assets) : IClassFixt
             yield return (map.Sources[source], map.Line(source, line) ?? "");
     }
 
-    /// <summary>Tells a change to the minified output, which needs a new pattern, from a change to Umbraco's code.</summary>
-    private static string Triage(SourceMap? map, string file, string generated, BackOfficeAssetPatches.SourceLine origin)
+    /// <summary>
+    /// Returns a message saying whether only the minified output changed, so the pattern needs updating, or Umbraco
+    /// changed the code that <paramref name="origin"/> names, so the patch needs another look.
+    /// </summary>
+    private static string Triage(SourceMap? map, string file, string generated, SourceLine origin)
     {
         if (map is null)
             return generated.Contains(origin.Code, StringComparison.Ordinal)
@@ -80,8 +92,11 @@ public sealed class PatchOriginTests(AssetPatchTests.Assets assets) : IClassFixt
             : $"{origin.File} no longer contains {origin.Code}: Umbraco changed this code, so check whether the patch is still needed.";
     }
 
-    /// <summary>Finds the bundles now built from the patch's sources, for when Umbraco renames or regroups them.</summary>
-    private async Task<string> WhereSourcesAreAsync(BackOfficeAssetPatches.AssetPatch patch)
+    /// <summary>
+    /// Returns a message naming the bundles now built from the sources <paramref name="patch"/> names, which locates a
+    /// file that Umbraco renamed or regrouped.
+    /// </summary>
+    private async Task<string> WhereSourcesAreAsync(AssetPatch patch)
     {
         var sources = patch.Edits.Select(edit => edit.Origin?.File).Append(patch.Source).OfType<string>().ToHashSet();
         if (sources.Count == 0)
@@ -91,13 +106,14 @@ public sealed class PatchOriginTests(AssetPatchTests.Assets assets) : IClassFixt
         {
             if (!path.EndsWith(".js", StringComparison.Ordinal)) continue;
             if (sources.Contains(path) || (await SourceMap.ReadAsync(assets.Files.GetFileInfo(path + ".map")))?.Sources.Any(sources.Contains) == true)
-                found.Add(BackOfficeAssetPatches.NormalizePath(path));
+                found.Add(AssetPatcher.NormalizePath(path));
         }
         return found.Count == 0
             ? $"No bundle is built from {string.Join(", ", sources)} any more."
             : $"{string.Join(", ", sources)} now builds {string.Join(", ", found)}.";
     }
 
+    /// <summary>Reads <paramref name="file"/> as text.</summary>
     private static async Task<string> ReadAsync(IFileInfo file)
     {
         using var reader = new StreamReader(file.CreateReadStream());

@@ -3,14 +3,23 @@ using Microsoft.Extensions.FileProviders;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
+/// <summary>
+/// Scans Umbraco's restored assets and sources for URLs that can lose the virtual path and that no patch or review
+/// covers.
+/// </summary>
 public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : IClassFixture<AssetPatchTests.Assets>
 {
-    private static readonly BackOfficeAssetPatches.PatchContext Context = new("/portal", "/portal/umbraco", "/portal/umbraco/backoffice/hash");
+    private static readonly PatchContext Context = new("/portal", "/portal/umbraco", "/portal/umbraco/backoffice/hash");
 
+    /// <summary>
+    /// Checks that, after patching, no restored JavaScript or CSS file still refers to <c>/umbraco/backoffice/</c>,
+    /// <c>/umbraco/website/</c> or <c>/umbraco/login/</c> after a quote or parenthesis, apart from one known diagnostic
+    /// constant.
+    /// </summary>
     [Fact]
     public async Task Root_absolute_asset_references_are_patched_or_explained()
     {
-        // This string classifies stack frames; it is not a fetched URL.
+        // This module's /umbraco/backoffice/ constant classifies stack frames, and nothing fetches it.
         const string diagnosticModule = "/umbraco/backoffice/packages/core/utils/index.js";
         var references = new Regex("""["'`(]/umbraco/(?:backoffice|website|login)/""");
         var unexpected = new List<string>();
@@ -22,11 +31,11 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
             examined++;
             if (path == diagnosticModule)
             {
-                // Allow only the known diagnostic constant, not other URLs added to this file.
+                // Remove only the known diagnostic constant, so any other URL added to this file still fails the test.
                 source = source.Replace("const U = \"/umbraco/backoffice/\";", "", StringComparison.Ordinal);
             }
-            else if (BackOfficeAssetPatches.For(path) is { } patch)
-                source = BackOfficeAssetPatches.Patch(patch, source, Context, Unapplied);
+            else if (AssetPatcher.For(path) is { } patch)
+                source = AssetPatcher.Patch(patch, source, Context, Unapplied);
             foreach (Match match in references.Matches(source))
                 unexpected.Add($"{path}:{source.AsSpan(0, match.Index).Count('\n') + 1}: {match.Value}");
         }
@@ -34,13 +43,17 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
         Assert.True(unexpected.Count == 0, "Unpatched asset references:\n" + string.Join('\n', unexpected));
     }
 
+    /// <summary>
+    /// Checks that every line of Umbraco's sources that builds a URL in a way that can lose the virtual path is patched
+    /// or reviewed, and that every review still matches a line.
+    /// </summary>
     [Fact]
     public async Task Url_construction_in_Umbraco_sources_is_patched_or_reviewed()
     {
-        // The bundles' source maps carry Umbraco's TypeScript, and the apps that ship without maps are
-        // unminified, so URL construction can be found by name. A line is patched when an edit names it,
-        // which PatchOriginTests confirms against the source maps, or when its bundle's asset URLs are moved.
-        // Every review below must still match a line: a missing one means Umbraco changed that code.
+        // The bundles' source maps carry Umbraco's TypeScript, and the apps without maps ship unminified, so URL
+        // construction can be found by name. A line is patched when an edit names it, which PatchOriginTests confirms
+        // against the source maps, or when its bundle has its asset URLs moved. Every review must still match a line;
+        // a review without one means Umbraco changed that code.
         var sources = await ReadSourcesAsync();
         var unexpected = new List<string>();
         var found = new HashSet<ReviewedLine>();
@@ -67,7 +80,10 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
             + string.Join('\n', missing));
     }
 
-    /// <summary>Shapes of URL construction that lose the virtual path when a part is not what the code assumes.</summary>
+    /// <summary>
+    /// Returns whether <paramref name="line"/> builds a URL in a shape that loses the virtual path when one of its parts
+    /// differs from what the code assumes.
+    /// </summary>
     private static bool ConstructsUrl(string line, string file)
         // The server URL followed directly by a dynamic part, which may already include the virtual path.
         => ServerUrlJoin().IsMatch(line)
@@ -78,14 +94,19 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
             // Root-absolute paths, except the routes of the generated API client, which adds the server URL.
             || (!file.EndsWith(".gen.ts", StringComparison.Ordinal) && RootPath().IsMatch(line));
 
-    /// <summary>Whether a patch changes the line: an edit names it, or a bundle containing it has its asset URLs moved.</summary>
+    /// <summary>
+    /// Returns whether a patch changes <paramref name="line"/>: an edit names it, or it contains a quoted asset URL and
+    /// one of its <paramref name="bundles"/> has its asset URLs moved.
+    /// </summary>
     private static bool IsPatched(string file, string line, IEnumerable<string> bundles)
         => BackOfficeAssetPatches.Patches.SelectMany(patch => patch.Edits).Any(edit =>
                 edit.Origin is { } origin && origin.File == file && line.Contains(origin.Code, StringComparison.Ordinal))
-            || (BackOfficeAssetPatches.QuotedAssetRoot().IsMatch(line)
-                && bundles.Any(bundle => BackOfficeAssetPatches.For(bundle) is { MovesAssetUrls: true }));
+            || (AssetPatcher.QuotedAssetRoot().IsMatch(line)
+                && bundles.Any(bundle => AssetPatcher.For(bundle) is { MovesAssetUrls: true }));
 
-    /// <summary>A line of Umbraco's source that needs no patch, by its file and a fragment of its code.</summary>
+    /// <summary>
+    /// A line of Umbraco's source that needs no patch: its file, a fragment of its code, and the reason.
+    /// </summary>
     private sealed record ReviewedLine(string File, string Code, string Reason);
 
     private static readonly ReviewedLine[] Reviews =
@@ -128,7 +149,10 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
             "Checks that the server's ReturnUrl, which includes the virtual path, is on this origin."),
     ];
 
-    /// <summary>Umbraco's own sources, with the bundles that contain each: TypeScript from source maps, or the script itself.</summary>
+    /// <summary>
+    /// Reads Umbraco's own sources, each with the bundles that contain it: the TypeScript in each source map, or the
+    /// script itself when it has no map. Skips third-party code, translations, mocks and tests.
+    /// </summary>
     private async Task<Dictionary<string, (string Text, List<string> Bundles)>> ReadSourcesAsync()
     {
         var sources = new Dictionary<string, (string Text, List<string> Bundles)>(StringComparer.Ordinal);
@@ -157,26 +181,41 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
         return sources;
     }
 
+    /// <summary>Reads <paramref name="file"/> as text.</summary>
     private static async Task<string> ReadAsync(IFileInfo file)
     {
         using var reader = new StreamReader(file.CreateReadStream());
         return await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
     }
 
+    /// <summary>Fails the test with the reason a change could not be applied.</summary>
     private static void Unapplied(string resource, string reason) => Assert.Fail($"Umbraco's {resource} {reason}");
 
+    /// <summary>
+    /// Matches a server URL, as a variable or <c>getServerUrl()</c>, joined directly to a dynamic part in a template
+    /// literal or with <c>+</c>.
+    /// </summary>
     [GeneratedRegex("""(?:(?:\b|[#_])server_?url|getServerUrl\(\))\s*(?:\}\s*\$\{|\+\s*(?![\s'"`]))""", RegexOptions.IgnoreCase)]
     private static partial Regex ServerUrlJoin();
 
+    /// <summary>Matches <c>new URL(</c> called with a second argument, the base.</summary>
     [GeneratedRegex(@"new URL\((?:[^()]|\([^()]*\))+,")]
     private static partial Regex UrlWithBase();
 
+    /// <summary>
+    /// Matches <c>location.origin</c> compared with another value, tested with <c>startsWith</c>, or passed as a
+    /// <c>postMessage</c> target origin.
+    /// </summary>
     [GeneratedRegex(@"[!=]==\s*(?:window\.)?location\.origin|(?:window\.)?location\.origin\s*[!=]==|\.startsWith\(\s*(?:window\.)?location\.origin\s*\)|postMessage\(.*,\s*(?:window\.)?location\.origin\s*\)")]
     private static partial Regex OriginComparison();
 
+    /// <summary>
+    /// Matches a quoted root-absolute path under <c>/umbraco/</c>, <c>/App_Plugins/</c> or <c>/media/</c>.
+    /// </summary>
     [GeneratedRegex("""['"`]/(?:umbraco|App_Plugins|media)/""")]
     private static partial Regex RootPath();
 
+    /// <summary>Matches source map entries for dependencies, mocks, tests and stories, which the scan skips.</summary>
     [GeneratedRegex(@"node_modules|/mocks/|\.test\.ts$|\.stories\.ts$")]
     private static partial Regex NotUmbracoSource();
 }

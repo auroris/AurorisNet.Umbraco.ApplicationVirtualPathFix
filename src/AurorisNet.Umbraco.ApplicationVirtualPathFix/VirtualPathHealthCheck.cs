@@ -5,8 +5,9 @@ using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 
 /// <summary>
-/// Shows in the backoffice what the startup log reports, with how requests reach the site: the Umbraco version,
-/// the path base requests arrive with, changes that could not be applied, and requests outside the virtual path.
+/// Reports the fix's status under Settings → Health Check: whether the Umbraco version matches, whether requests arrive
+/// with the configured path base, whether every patch applied, and whether requests reached the site outside the
+/// virtual path.
 /// </summary>
 [HealthCheck(CheckId, "Application virtual path", Description = "Checks the fixes for hosting the site under an application virtual path.",
     Group = "Configuration")]
@@ -15,11 +16,20 @@ internal sealed class VirtualPathHealthCheck(VirtualPathStatus status, IHostingE
 {
     internal const string CheckId = "6c5d7a2e-91f4-4b3a-8e0d-3f2b9c6a1e47";
 
+    /// <summary>
+    /// Returns the check's results. The path base result describes the request that runs the check.
+    /// </summary>
     public override Task<IEnumerable<HealthCheckStatus>> GetStatusAsync() => Task.FromResult<IEnumerable<HealthCheckStatus>>(Check().ToArray());
 
+    /// <summary>Throws <see cref="InvalidOperationException"/>, because the check offers no actions.</summary>
     public override HealthCheckStatus ExecuteAction(HealthCheckAction action)
         => throw new InvalidOperationException("The application virtual path check has no actions.");
 
+    /// <summary>
+    /// Produces the results in order: the Umbraco version, then at the root a note that only the session restore fix
+    /// applies. Under a virtual path it continues with the request's path base, the patched files or each problem, and
+    /// the requests outside the virtual path.
+    /// </summary>
     private IEnumerable<HealthCheckStatus> Check()
     {
         yield return ApplicationVirtualPathFixComposer.MismatchedUmbracoVersion(umbraco) is { } built
@@ -52,5 +62,6 @@ internal sealed class VirtualPathHealthCheck(VirtualPathStatus status, IHostingE
                 + $"{status.LastRequestOutside}. Route only {prefix} to the site, unless these are load balancer probes.");
     }
 
+    /// <summary>Creates a result of <paramref name="type"/> with <paramref name="message"/>.</summary>
     private static HealthCheckStatus Status(StatusResultType type, string message) => new(message) { ResultType = type };
 }

@@ -4,11 +4,11 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
-    <!-- Parses the patched scripts, so a broken replacement fails without starting a browser. -->
+    <!-- Acornima parses the patched scripts, so a broken replacement fails the fast tests before any browser starts. -->
     <PackageVersion Include="Acornima" Version="1.9.2" />
     <PackageVersion Include="Microsoft.Playwright" Version="1.64.1" />
     <PackageVersion Include="Umbraco.Cms" Version="[$(UmbracoVersion)]" />
-    <!-- The end-to-end site test mirrors `dotnet new umbraco` with the starter kit. -->
+    <!-- The browser test sites match a project created by `dotnet new umbraco` with the starter kit. -->
     <PackageVersion Include="Umbraco.Cms.DevelopmentMode.Backoffice" Version="[$(UmbracoVersion)]" />
     <PackageVersion Include="Umbraco.TheStarterKit" Version="18.0.0" />
   </ItemGroup>

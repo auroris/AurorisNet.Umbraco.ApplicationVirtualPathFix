@@ -6,11 +6,18 @@ using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 
-/// <summary>Invalidate patched backoffice modules when either Umbraco or this package changes.</summary>
+/// <summary>
+/// Generates Umbraco's backoffice paths with a cache-bust hash that changes with both Umbraco and this package, so
+/// browsers fetch the patched modules again after either changes.
+/// </summary>
 internal sealed class BackOfficePaths : IBackOfficePathGenerator
 {
     internal static readonly string BuildVersion = typeof(BackOfficePaths).Assembly.ManifestModule.ModuleVersionId.ToString("N");
 
+    /// <summary>
+    /// Copies Umbraco's backoffice paths and replaces the cache-bust hash with a SHA-256 hash of Umbraco's hash and
+    /// <see cref="BuildVersion"/>.
+    /// </summary>
     public BackOfficePaths(IHostingEnvironment environment, IUmbracoVersion version)
     {
         var original = new UmbracoBackOfficePathGenerator(environment, version);

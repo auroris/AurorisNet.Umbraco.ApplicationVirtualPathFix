@@ -9,8 +9,11 @@ using Umbraco.Cms.Web.Common.Hosting;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 
-/// <summary>Applies the HTML fixes while Umbraco's existing compiled views render their body.</summary>
-#pragma warning disable CS0618 // Umbraco 18's token handler still uses these cookie options.
+/// <summary>
+/// Adds the package's attributes to the backoffice page's <c>umb-app</c> element and corrects the basic-auth form
+/// actions, while Umbraco's compiled views render the body.
+/// </summary>
+#pragma warning disable CS0618 // Umbraco 18's token handler still reads these obsolete cookie options.
 internal sealed class BackOfficeBodyTagHelperComponent(
     IBackOfficePathGenerator paths, IOptions<BackOfficeTokenCookieSettings> cookies, IOptions<GlobalSettings> global)
     : TagHelperComponent
@@ -19,6 +22,12 @@ internal sealed class BackOfficeBodyTagHelperComponent(
     [ViewContext]
     public ViewContext ViewContext { get; set; } = null!;
 
+    /// <summary>
+    /// Adds attributes to the <c>umb-app</c> element on the backoffice page: <c>data-restore-session</c> when a session
+    /// may exist and, under a virtual path, <c>data-path-base</c> and <c>backoffice-path</c>. The response then gets
+    /// <c>Cache-Control: no-store</c>. Under a virtual path, also removes the doubled path base from the form actions on
+    /// the basic-auth pages.
+    /// </summary>
     public override async Task ProcessAsync(TagHelperContext context, TagHelperOutput output)
     {
         if (context.TagName != "body") return;
@@ -27,13 +36,13 @@ internal sealed class BackOfficeBodyTagHelperComponent(
         var request = ViewContext.HttpContext.Request;
         if (!backOffice && !(basicAuth && request.PathBase.HasValue)) return;
 
-        // Preserve content already changed by another component, including suppressed output.
+        // Start from content another component has already changed, including suppressed output.
         var content = output.IsContentModified ? output.Content : await output.GetChildContentAsync();
         var html = content.GetContent();
         var patched = html;
         if (basicAuth)
         {
-            // MVC's basic-auth routes include the prefix, so Url.Action adds PathBase twice.
+            // MVC's basic-auth routes already include the prefix, so Url.Action adds the path base a second time.
             var path = paths.BackOfficePath + "/basic-auth";
             patched = html.Replace("\"" + HtmlEncoder.Default.Encode(request.PathBase + path),
                 "\"" + HtmlEncoder.Default.Encode(path), StringComparison.Ordinal);
@@ -47,24 +56,30 @@ internal sealed class BackOfficeBodyTagHelperComponent(
                 attributes.Append("data-restore-session ");
             if (request.PathBase.HasValue)
             {
-                // Only the path base: auth.js adds the origin the browser loaded the page from, as Umbraco itself
-                // does at the root, so the backoffice depends on neither the Host header nor forwarded headers.
+                // Write only the path base. auth.js adds the origin the browser loaded the page from, as Umbraco does at
+                // the root, so the server URL depends on neither the Host header nor forwarded headers.
                 attributes.Append($"data-path-base=\"{HtmlEncoder.Default.Encode(request.PathBase.ToString())}\" ");
                 attributes.Append($"backoffice-path=\"{HtmlEncoder.Default.Encode(paths.BackOfficePath)}\" ");
             }
             patched = html.Replace("<umb-app ", "<umb-app " + attributes, StringComparison.Ordinal);
-            // Only the presence of a possible session enters the HTML; tokens stay HTTP-only.
+            // The page now depends on the request's cookies, so keep it out of caches. Only the hint that a session may
+            // exist enters the HTML; the tokens stay in HTTP-only cookies.
             ViewContext.HttpContext.Response.Headers.CacheControl = "no-store";
         }
         if (patched != html) output.Content.SetHtmlContent(patched);
     }
 
+    /// <summary>
+    /// Returns whether the browser may hold a session: the refresh cookie <paramref name="cookieName"/> arrived, or, with
+    /// <paramref name="strictCookies"/>, the browser may have withheld it on a cross-site navigation. An OAuth callback,
+    /// which carries a <c>code</c> query, counts only when the cookie arrived.
+    /// </summary>
     private static bool ShouldRestoreSession(HttpRequest request, string cookieName, bool strictCookies)
     {
         if (request.Cookies.ContainsKey(cookieName)) return true;
         if (!strictCookies || request.Query.ContainsKey("code")) return false;
-        // Strict cookies may have been withheld on an external navigation. With no Fetch
-        // Metadata header (plain HTTP away from localhost), cookie presence alone decides.
+        // Browsers withhold SameSite=Strict cookies on a navigation that another site started. Without a Sec-Fetch-Site
+        // header (plain HTTP away from localhost), the cookie alone decides.
         return request.Headers["Sec-Fetch-Site"] == "cross-site";
     }
 }

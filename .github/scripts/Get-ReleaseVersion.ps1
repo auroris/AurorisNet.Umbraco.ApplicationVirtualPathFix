@@ -1,3 +1,22 @@
+<#
+.SYNOPSIS
+Chooses the package version and release tag for this branch's next release.
+
+.DESCRIPTION
+Reads UmbracoVersion from Directory.Build.props and checks that the branch name matches it and that the checkout is
+the commit being released. A commit that already carries a release tag reuses that revision, so a retried release
+can finish. Any other commit must be the branch tip on origin, and it gets the revision after the highest existing
+tag, starting at 1.
+
+.PARAMETER BranchName
+The branch being released, such as umbraco/18.3.1.
+
+.PARAMETER Commit
+The full hash of the commit being released. It must match the checked-out HEAD.
+
+.OUTPUTS
+An object with Version, such as 18.3.1.2, and Tag, such as v18.3.1.2.
+#>
 param(
     [Parameter(Mandatory)][string] $BranchName,
     [Parameter(Mandatory)][string] $Commit
@@ -30,11 +49,11 @@ $headRevisions = @($headTags | ForEach-Object {
 })
 $revision = 1
 if ($headRevisions.Count -gt 0) {
-    # Retrying a release reuses its reserved version, even after another commit has been released.
+    # A retried release reuses the version reserved for this commit, even after a newer commit has been released.
     $revision = [int] ($headRevisions | Measure-Object -Maximum).Maximum
 } else {
-    # A new revision must come from the branch tip. Re-running an old workflow run checks out its
-    # original commit, which would otherwise publish older code under the highest revision.
+    # Allocate a new revision only for the branch tip. Re-running an old workflow run checks out its original commit,
+    # and that would publish older code under the newest revision.
     $branchTip = git rev-parse --verify --quiet "refs/remotes/origin/$BranchName"
     if ($LASTEXITCODE -ne 0 -or $branchTip -cne $Commit) {
         throw "Commit $Commit is not the tip of $BranchName. Run Release again from the branch to publish its latest commit."

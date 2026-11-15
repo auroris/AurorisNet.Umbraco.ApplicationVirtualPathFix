@@ -7,7 +7,8 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <PackageId>AurorisNet.Umbraco.ApplicationVirtualPathFix</PackageId>
     <Title>Umbraco Application Virtual Path Fix</Title>
-    <!-- Releases supply the revision; revision 0 is never published, so local packs cannot shadow a release. -->
+    <!-- The release workflow supplies the revision. Local packs keep revision 0, which is never published, so they
+         cannot shadow a release in NuGet's cache. -->
     <Version>$(UmbracoVersion).0</Version>
     <Authors>Auroris</Authors>
     <Description>Fixes application virtual path hosting, backoffice assets, media, login and initial token refresh in Umbraco $(UmbracoVersion). Registers automatically through Umbraco startup.</Description>
@@ -17,8 +18,8 @@
     <PackageProjectUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</PackageProjectUrl>
     <RepositoryUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <!-- Symbols travel inside the assembly, and Source Link points them at this repository's commit,
-         so a site's debugger can step into the package. Generated sources are embedded as well. -->
+    <!-- Embed the symbols and generated sources in the assembly. Source Link points the symbols at this commit on
+         GitHub, so a site's debugger can step into the package. -->
     <DebugType>embedded</DebugType>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
@@ -26,10 +27,10 @@
     <InternalsVisibleTo Include="AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <!--
-      Depend on the parts of Umbraco the package uses rather than the Umbraco.Cms meta-package, so sites
-      that assemble Umbraco from individual packages (for example with ImageSharp2) can install it.
-      StaticAssets carries the backoffice scripts the package patches, so its exact version is the one
-      that matters. The patches must be verified before supporting another Umbraco version.
+      Reference the Umbraco packages the package uses rather than the Umbraco.Cms meta-package, so sites that
+      assemble Umbraco from individual packages (for example with ImageSharp2) can install it. Umbraco.Cms.StaticAssets
+      carries the backoffice scripts the package patches, so its exact version matters most. Verify the patches
+      before supporting another Umbraco version.
     -->
     <PackageReference Include="Umbraco.Cms.Web.Common" Version="[$(UmbracoVersion)]" />
     <PackageReference Include="Umbraco.Cms.StaticAssets" Version="[$(UmbracoVersion)]" />
@@ -42,17 +43,18 @@
     <Using Include="Microsoft.Extensions.Configuration" />
     <Using Include="Microsoft.Extensions.DependencyInjection" />
     <Using Include="Umbraco.Extensions" />
-    <!-- nuget.org renders Markdown only, without HTML or relative links, so the package gets its own README. -->
+    <!-- nuget.org renders Markdown without HTML or relative links, so the package has its own README. -->
     <None Include="../../docs/NUGET.md" Pack="true" PackagePath="README.md" />
     <None Include="../../LICENSE" Pack="true" PackagePath="/" />
     <Content Update="appsettings-schema*.json;umbraco-package-schema.json" Pack="false" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
   </ItemGroup>
   <!--
-    Patched files are served with the newer of Umbraco's file time and this commit's time as Last-Modified, so their
-    cache validators agree across restarts and servers yet change with each release. Pass SourceTimestamp to override.
+    Records this commit's time in the assembly. Patched files use the later of Umbraco's file time and this time as
+    Last-Modified, so their cache validators agree across restarts and servers and change with each release. Pass
+    -p:SourceTimestamp=2026-11-14T12:00:00Z to set the time, for example when building outside a Git checkout.
   -->
   <Target Name="AddSourceTimestamp" BeforeTargets="GetAssemblyAttributes">
-    <!-- cmd reads %% as a literal %; sh does not. -->
+    <!-- %25 is MSBuild's escape for %. On Windows, Exec runs the command from a batch file, where %% is a literal %. -->
     <Exec Condition="'$(SourceTimestamp)' == '' AND '$(OS)' == 'Windows_NT'" Command="git log -1 --format=%25%25cI" EchoOff="true"
           ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
       <Output TaskParameter="ConsoleOutput" PropertyName="SourceTimestamp" />

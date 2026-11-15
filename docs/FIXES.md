@@ -55,15 +55,19 @@ change, and one or more for a URL rewrite. Compatibility tests check every regis
 bundle and search pattern against the installed Umbraco assets, including bundles
 the browser scenarios do not load. They also check, through Umbraco's source maps,
 that each change hits the line of Umbraco's TypeScript it names, and that every
-patched script still parses.
+patched script still parses. To review every change, read
+[`BackOfficeAssetPatches.cs`](../src/AurorisNet.Umbraco.ApplicationVirtualPathFix/BackOfficeAssetPatches.cs):
+it lists each patched file with the code it finds, the code that replaces it, and a
+note on why.
 
 At startup, a file provider reads those installed assets and prepares patched
 copies in memory. Umbraco's static-file middleware serves them at their original
 URLs, with lengths and cache validators for the patched content. A patched file's
 `Last-Modified` is the later of the Umbraco file's time and the time of the commit
 the package was built from, so its validators agree across restarts and servers.
-Patches keep every line in place, so Umbraco's source maps still apply to the patched
-files in the browser's developer tools. The original files stay unchanged. Restart
+Patches preserve generated line numbers, but replacements shift columns on edited
+lines. Umbraco's original source maps are therefore approximate on those lines in
+the browser's developer tools. The original files stay unchanged. Restart
 the site after changing an upstream asset or patch.
 
 A Tag Helper Component applies the HTML corrections while Razor renders the body
@@ -141,9 +145,9 @@ affect startup, authentication and URL generation.
 The `full` case:
 
 - request the OpenAPI documents;
-- visit every front-end page reachable from the home page and check that each image loads;
+- visit the home page and one nested blog page, checking their paths and images;
 - request a password reset and follow the emailed link to the new-password form;
-- load Umbraco's built-in error page with its fonts and background, and submit the contact form, an Umbraco surface form, with an invalid and then a valid address;
+- load Umbraco's built-in error page with its fonts and background, and submit the contact form to check that its action and redirect keep the virtual path;
 - sign in to the backoffice and check the dashboard and the header logo;
 - run the health check as the backoffice dashboard does, and expect every result to succeed;
 - open the backoffice using a differently cased prefix, import every patched JavaScript module, and check real static-file 304 responses;
@@ -159,7 +163,7 @@ The `full` case:
 - sign out, verify the prefixed logout redirect, and reload to check the session stays signed out.
 
 The other cases reuse only the steps relevant to their hosting risks; they do not
-repeat the front-end crawl, email, editor, stylesheet or media-upload journey.
+repeat the nested-page, email, editor, stylesheet or media-upload journey.
 File-provider tests check the prepared bytes, lengths, HEAD requests, conditional
 responses and byte ranges through the real static-file middleware. Component tests
 use the real body Tag Helper to check view scoping, URL attributes, basic-auth forms,

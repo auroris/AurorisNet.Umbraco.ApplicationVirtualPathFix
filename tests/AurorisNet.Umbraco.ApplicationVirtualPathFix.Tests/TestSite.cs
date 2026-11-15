@@ -18,15 +18,42 @@ using Umbraco.Cms.Core.Sync;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
-public enum TestHost { Kestrel, Iis, ReverseProxy }
+/// <summary>How requests reach a test site.</summary>
+public enum TestHost
+{
+    /// <summary>Directly, with the prefix in the request path.</summary>
+    Kestrel,
+
+    /// <summary>With the prefix already moved into the path base, as an IIS child application does.</summary>
+    Iis,
+
+    /// <summary>
+    /// Through a TLS-terminating proxy that strips the prefix and passes the public host, scheme and prefix in forwarded
+    /// headers.
+    /// </summary>
+    ReverseProxy,
+}
 
 /// <summary>How a disposable test site is hosted.</summary>
-/// <param name="Prefix">The application virtual path, or "" for a site at the root.</param>
-/// <param name="Host">How the prefix and external origin reach the application.</param>
-/// <param name="MediaOutsideWebRoot">Store media in an absolute folder outside wwwroot, as file-system providers such as Azure Blob Storage do.</param>
-/// <param name="WebSockets">False models a host without WebSocket support, so SignalR falls back to Server-Sent Events.</param>
-/// <param name="BasicAuth">Protect the front end with Umbraco's basic authentication and its login page.</param>
-/// <param name="Https">Use a disposable self-signed certificate to exercise secure cookies.</param>
+/// <param name="Prefix">
+/// The application virtual path, such as <c>/SomeTestPath</c>, or an empty string for a site at the root.
+/// </param>
+/// <param name="Host">How the prefix and the public origin reach the application.</param>
+/// <param name="MediaOutsideWebRoot">
+/// Stores media in an absolute folder outside <c>wwwroot</c>, so the site serves it through Umbraco's media file system, as
+/// it does media in a provider such as Azure Blob Storage.
+/// </param>
+/// <param name="WebSockets">
+/// <see langword="false"/> models a host without WebSocket support, so SignalR falls back to Server-Sent Events.
+/// </param>
+/// <param name="BasicAuth">
+/// Protects the front end with Umbraco's basic authentication and redirects visitors to its login page.
+/// </param>
+/// <param name="Https">Serves HTTPS with a disposable self-signed certificate, which exercises secure cookies.</param>
+/// <param name="Debug">
+/// Sets <c>Umbraco:CMS:Hosting:Debug</c>. With the default, as in the template's Development settings, Umbraco serves
+/// backoffice modules with <c>no-cache</c>.
+/// </param>
 internal sealed record SiteOptions(
     string Prefix,
     TestHost Host = TestHost.Kestrel,
@@ -40,8 +67,8 @@ internal sealed record SiteOptions(
 }
 
 /// <summary>
-/// A disposable site built like <c>dotnet new umbraco</c> with the starter kit: SQLite, Kestrel,
-/// unattended install, standard Umbraco startup with no explicit package registration.
+/// A disposable site built like a <c>dotnet new umbraco</c> project with the starter kit: SQLite, Kestrel, an unattended
+/// install, and standard Umbraco startup, which finds the package's composer as a real site does.
 /// </summary>
 internal sealed class TestSite : IAsyncDisposable
 {
@@ -54,6 +81,10 @@ internal sealed class TestSite : IAsyncDisposable
     private bool _stopped;
     private string? _artifacts;
 
+    /// <summary>
+    /// Wraps the running <paramref name="app"/>, whose files are in <paramref name="root"/>. <see cref="StopAsync"/>
+    /// ignores log entries from before <paramref name="startedAt"/>, which belong to the install run.
+    /// </summary>
     private TestSite(WebApplication app, string root, SiteOptions options, Uri address, DateTimeOffset startedAt)
     {
         _app = app;
@@ -73,9 +104,15 @@ internal sealed class TestSite : IAsyncDisposable
 
     public string MailDirectory => Path.Combine(Root, "mail");
 
-    /// <summary>An absolute URL for a path relative to the application, such as <c>/umbraco</c>.</summary>
+    /// <summary>
+    /// Returns the absolute URL of <paramref name="path"/>, a path relative to the application such as <c>/umbraco</c>.
+    /// </summary>
     public Uri Url(string path) => new(Address, Options.Prefix + path);
 
+    /// <summary>
+    /// Creates an HTTP client that accepts this site's disposable certificate and follows redirects when
+    /// <paramref name="followRedirects"/> is <see langword="true"/>.
+    /// </summary>
     public HttpClient CreateHttpClient(bool followRedirects = true) => new(new HttpClientHandler
     {
         AllowAutoRedirect = followRedirects,
@@ -83,12 +120,18 @@ internal sealed class TestSite : IAsyncDisposable
             errors == SslPolicyErrors.None || request.RequestUri?.Authority == Address.Authority,
     });
 
+    /// <summary>
+    /// Creates a site in a new temporary folder, installs Umbraco with the starter kit and restarts it, as a real site
+    /// restarts after installing. Then publishes the imported content, adds two test images to the home template and
+    /// returns the running site. When startup fails, copies the logs to <paramref name="artifacts"/> and deletes the
+    /// folder.
+    /// </summary>
     public static async Task<TestSite> StartAsync(SiteOptions options, CancellationToken cancellationToken, string? artifacts = null)
     {
         var root = Directory.CreateTempSubdirectory("virtual-path-fix-test-").FullName;
         Directory.CreateDirectory(Path.Combine(root, "wwwroot"));
         Directory.CreateDirectory(Path.Combine(root, "mail"));
-        // A new Umbraco site starts with view imports and block partials; the starter kit relies on them.
+        // A new Umbraco site starts with view imports and block partials, which the starter kit relies on.
         var template = Path.Combine(AppContext.BaseDirectory, "SiteTemplate");
         foreach (var file in Directory.EnumerateFiles(template, "*", SearchOption.AllDirectories))
         {
@@ -101,9 +144,8 @@ internal sealed class TestSite : IAsyncDisposable
         {
             var settings = Settings(root, options);
 
-            // The first start installs Umbraco and imports the starter kit. Like a real site, restart
-            // it afterwards: some routes (basic authentication's, for example) are only mapped when
-            // Umbraco is already installed at startup.
+            // The first start installs Umbraco and imports the starter kit. Restart afterwards, as a real site does:
+            // Umbraco maps some routes, such as basic authentication's, only when it is already installed at startup.
             var installer = await BootAsync(root, options, settings, cancellationToken);
             try
             {
@@ -119,8 +161,10 @@ internal sealed class TestSite : IAsyncDisposable
             try
             {
                 PublishImportedContent(app);
-                // Exercise normal Razor media URL and signed crop generation from the real picker
-                // value, alongside the starter kit's background image.
+                // Render the hero picker's media URL and a signed crop URL with Razor, next to the starter kit's own
+                // background image. The crop passes this site's services explicitly: the parameterless overload caches
+                // its generator in a static readonly property, which would carry an earlier site's HMAC key into later
+                // sites in this process.
                 await File.AppendAllTextAsync(Path.Combine(root, "Views", "Home.cshtml"), """
 
                     @inject Umbraco.Cms.Core.Media.IImageUrlGenerator TestImageUrlGenerator
@@ -132,9 +176,6 @@ internal sealed class TestSite : IAsyncDisposable
                         <img id="test-media-crop" src="@testImage.GetCropUrl(TestImageUrlGenerator, TestValueFallback, TestUrlProvider, width: 100, height: 60)" alt="Test crop" />
                     }
                     """, cancellationToken);
-                // The parameterless helper caches its generator in a static readonly property.
-                // Pass this site's services to the same underlying helper so a previous test's
-                // HMAC key cannot leak into the next disposable site in this process.
                 var address = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
                 return new TestSite(app, root, options, address, startedAt) { _artifacts = artifacts };
             }
@@ -155,8 +196,8 @@ internal sealed class TestSite : IAsyncDisposable
     }
 
     /// <summary>
-    /// The starter kit 18.0.0 imports its content unpublished when Umbraco installs unattended;
-    /// publish it as an editor would.
+    /// Publishes each unpublished root item with its descendants, as an editor would, and fails the test if any item fails
+    /// to publish. The starter kit 18.0.0 imports its content unpublished when Umbraco installs unattended.
     /// </summary>
     private static void PublishImportedContent(WebApplication app)
     {
@@ -168,6 +209,10 @@ internal sealed class TestSite : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Returns the configuration for a site in <paramref name="root"/>: a SQLite database, an unattended install with the
+    /// test user, emails written to the <c>mail</c> folder, and the hosting choices in <paramref name="options"/>.
+    /// </summary>
     private static Dictionary<string, string?> Settings(string root, SiteOptions options)
     {
         var settings = new Dictionary<string, string?>
@@ -176,15 +221,15 @@ internal sealed class TestSite : IAsyncDisposable
             ["ConnectionStrings:umbracoDbDSN_ProviderName"] = "Microsoft.Data.Sqlite",
             ["Umbraco:CMS:Global:Id"] = Guid.NewGuid().ToString(),
             ["Umbraco:CMS:Global:UseHttps"] = "false",
-            // Keep image authorization enabled across both boots, like a normally installed site.
+            // One HMAC key for both boots keeps image URL signing enabled, as on a normally installed site.
             ["Umbraco:CMS:Imaging:HMACSecretKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
-            // Emails are written to a folder so the test can follow the links in them.
+            // Write emails to a folder, so the tests can follow the links in them.
             ["Umbraco:CMS:Global:Smtp:From"] = "umbraco@example.test",
             ["Umbraco:CMS:Global:Smtp:DeliveryMethod"] = "SpecifiedPickupDirectory",
             ["Umbraco:CMS:Global:Smtp:PickupDirectoryLocation"] = Path.Combine(root, "mail"),
             ["Umbraco:CMS:WebRouting:ApplicationUrlDetection"] = "FirstRequest",
             ["Umbraco:CMS:Hosting:ApplicationVirtualPath"] = options.Prefix,
-            // As in the template's Development settings; serves backoffice modules with no-cache.
+            // With true, as in the template's Development settings, Umbraco serves backoffice modules with no-cache.
             ["Umbraco:CMS:Hosting:Debug"] = options.Debug.ToString(),
             ["Umbraco:CMS:DeliveryApi:Enabled"] = "true",
             ["Umbraco:CMS:DeliveryApi:PublicAccess"] = "true",
@@ -206,12 +251,20 @@ internal sealed class TestSite : IAsyncDisposable
         return settings;
     }
 
+    /// <summary>
+    /// Builds and starts one host for the site on a free loopback port, with <paramref name="settings"/> and the hosting
+    /// shape in <paramref name="options"/>. Clears Umbraco's process-wide caches first, so each site behaves as a separate
+    /// deployment. Waits for the unattended install or upgrade and checks that Umbraco reaches
+    /// <see cref="RuntimeLevel.Run"/>.
+    /// </summary>
     private static async Task<WebApplication> BootAsync(string root, SiteOptions options, Dictionary<string, string?> settings, CancellationToken cancellationToken)
     {
-        // Umbraco caches these across hosts in one process; each site here represents a separate deployment.
+        // Umbraco caches the backoffice path in a static field for the whole process. Clear it, because each site here is
+        // a separate deployment.
         typeof(global::Umbraco.Cms.Core.Hosting.HostingEnvironmentExtensions)
             .GetField("_backOfficePath", BindingFlags.Static | BindingFlags.NonPublic)!.SetValue(null, null);
-        // The "friendly" extension methods views use (Url(), Value(), ...) keep the first host's services.
+        // The "friendly" extension methods that views call, such as Url() and Value(), keep the first host's services in
+        // static fields. Clear those too.
         foreach (var type in AppDomain.CurrentDomain.GetAssemblies()
                      .Where(assembly => assembly.GetName().Name?.StartsWith("Umbraco.", StringComparison.Ordinal) == true)
                      .SelectMany(assembly => assembly.GetTypes())
@@ -234,10 +287,10 @@ internal sealed class TestSite : IAsyncDisposable
             .UseStaticWebAssets().UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
         builder.Configuration.AddInMemoryCollection(settings);
-        // Standard Umbraco startup: no AppHost or explicit package registration.
+        // Standard Umbraco startup, without an AppHost: AddComposers() finds the package's composer, as on a real site.
         builder.CreateUmbracoBuilder().AddBackOffice().AddWebsite().AddDeliveryApi().AddComposers().Build();
         builder.Services.Replace(ServiceDescriptor.Singleton<IServerRoleAccessor, SingleServerRoleAccessor>());
-        // Keep the real authenticated dashboard endpoint and UI, with deterministic news instead of an external feed.
+        // The news dashboard keeps its real authenticated endpoint and UI but shows fixed news instead of an external feed.
         builder.Services.Replace(ServiceDescriptor.Singleton<INewsDashboardService, TestNews>());
         builder.Services.AddSingleton<IStartupFilter>(new HostShape(options));
 
@@ -250,8 +303,8 @@ internal sealed class TestSite : IAsyncDisposable
             names.AddIpAddress(IPAddress.Loopback);
             request.CertificateExtensions.Add(names.Build());
             using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
-            // Windows TLS cannot use CreateSelfSigned's ephemeral private key. Reimport the PFX
-            // so the key lasts until certificate disposal, without installing a trusted certificate.
+            // Windows TLS cannot use the ephemeral private key that CreateSelfSigned creates. Reimporting the PFX keeps the
+            // key until the certificate is disposed, without installing anything in the trust store.
             certificate = X509CertificateLoader.LoadPkcs12(generated.Export(X509ContentType.Pfx), null);
             builder.WebHost.ConfigureKestrel(server => server.Listen(IPAddress.Loopback, 0, listen => listen.UseHttps(certificate)));
         }
@@ -279,8 +332,9 @@ internal sealed class TestSite : IAsyncDisposable
     }
 
     /// <summary>
-    /// Stops the site and returns the errors it logged, plus any warning from this package (such as a
-    /// patch that no longer matches Umbraco's scripts).
+    /// Stops the site, copies its logs to the artifacts folder when one was given, and returns the errors it logged after
+    /// the restart, plus any warning from this package, such as a patch that no longer matches Umbraco's scripts. Returns
+    /// an empty list when the site has already stopped.
     /// </summary>
     public async Task<IReadOnlyList<string>> StopAsync()
     {
@@ -302,7 +356,7 @@ internal sealed class TestSite : IAsyncDisposable
             {
                 using var entry = JsonDocument.Parse(line);
                 var properties = entry.RootElement;
-                // Only judge the site under test, not the install run before its restart.
+                // Skip entries from the install run before the restart; only the site under test counts.
                 if (properties.TryGetProperty("@t", out var t) && t.GetDateTimeOffset() < _startedAt)
                     continue;
                 var level = properties.TryGetProperty("@l", out var l) ? l.GetString() : "Information";
@@ -321,6 +375,7 @@ internal sealed class TestSite : IAsyncDisposable
         return problems;
     }
 
+    /// <summary>Stops the site and deletes its folder, unless <c>AVPF_KEEP_TEST_SITE=1</c> keeps it.</summary>
     public async ValueTask DisposeAsync()
     {
         try
@@ -333,6 +388,10 @@ internal sealed class TestSite : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Copies the site's JSON logs from <paramref name="root"/> to a <c>server-logs</c> folder under
+    /// <paramref name="artifacts"/>, when given.
+    /// </summary>
     private static void CopyLogs(string root, string? artifacts)
     {
         var source = Path.Combine(root, "umbraco", "Logs");
@@ -342,12 +401,16 @@ internal sealed class TestSite : IAsyncDisposable
             File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), overwrite: true);
     }
 
+    /// <summary>
+    /// Deletes the site's temporary folder <paramref name="root"/>, unless <c>AVPF_KEEP_TEST_SITE=1</c> keeps it. A file
+    /// that is still open leaves the folder in place and writes a note to the test output.
+    /// </summary>
     private static void DeleteRoot(string root)
     {
         // Set AVPF_KEEP_TEST_SITE=1 to inspect a site's database, logs and files after a run.
         if (Environment.GetEnvironmentVariable("AVPF_KEEP_TEST_SITE") == "1")
             return;
-        // Only remove the isolated directory created for this site.
+        // Delete only a folder that this class created in the temp directory.
         var fullRoot = Path.GetFullPath(root);
         if (fullRoot.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase)
             && Path.GetFileName(fullRoot).StartsWith("virtual-path-fix-test-", StringComparison.Ordinal))
@@ -358,29 +421,38 @@ internal sealed class TestSite : IAsyncDisposable
             }
             catch (IOException exception)
             {
-                // A file still held open must not hide the test's own result.
+                // Report a file that is still open instead of throwing, so the test's own result stays visible.
                 TestContext.Current.TestOutputHelper?.WriteLine($"Could not remove test site {fullRoot}: {exception.Message}");
             }
         }
     }
 
+    /// <summary>Supplies fixed news to the dashboard in place of Umbraco's external feed.</summary>
     private sealed class TestNews : INewsDashboardService
     {
+        /// <summary>Returns one news item headed <see cref="TestSite.NewsHeading"/>.</summary>
         public Task<NewsDashboardResponseModel> GetItemsAsync() => Task.FromResult(new NewsDashboardResponseModel
         {
             Items = [new() { Header = NewsHeading, Priority = "High", Body = "Loaded through the management API." }],
         });
     }
 
-    /// <summary>Models how requests reach the site: only under the prefix, optionally with a path base or without WebSockets.</summary>
+    /// <summary>
+    /// Models how requests reach the site: only under the prefix and, as <see cref="SiteOptions"/> chooses, through an IIS
+    /// path base, a reverse proxy, or a host without WebSockets.
+    /// </summary>
     private sealed class HostShape(SiteOptions options) : IStartupFilter
     {
+        /// <summary>
+        /// Adds middleware ahead of the site's pipeline: a 404 for requests outside the prefix, the WebSocket and IIS path
+        /// base choices, the reverse proxy's forwarded headers, and diagnostic headers on the backoffice page.
+        /// </summary>
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
         {
             app.Use(async (context, nextRequest) =>
             {
-                // A reverse proxy or IIS application boundary only forwards the site's own path,
-                // so anything that escapes the prefix fails the browser checks.
+                // A reverse proxy or IIS application forwards only the site's own path, so a request that escapes the
+                // prefix fails the browser checks.
                 if (options.Prefix.Length > 0 && !context.Request.Path.StartsWithSegments(options.Prefix))
                 {
                     context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -389,8 +461,8 @@ internal sealed class TestSite : IAsyncDisposable
 
                 if (!options.WebSockets)
                 {
-                    // As IIS without the WebSocket Protocol feature: nothing can accept a WebSocket
-                    // (HTTP/1.1 upgrade or extended CONNECT), so SignalR stops offering them.
+                    // Behave like IIS without the WebSocket Protocol feature: no request can open a WebSocket, by HTTP/1.1
+                    // upgrade or extended CONNECT, so SignalR stops offering them.
                     context.Features.Set<IHttpUpgradeFeature>(null);
                     context.Features.Set<IHttpExtendedConnectFeature>(null);
                     context.Features.Set<IHttpWebSocketFeature>(null);
@@ -398,23 +470,23 @@ internal sealed class TestSite : IAsyncDisposable
 
                 if (context.Request.Path == options.Prefix + "/umbraco")
                 {
-                    // Playwright's intercepted request headers omit some browser-added headers.
-                    // Report what the server actually received for the cross-site cookie test.
+                    // Playwright's intercepted requests omit some headers the browser adds. Report what the server
+                    // received, for the cross-site cookie test.
                     context.Response.Headers["X-Test-Fetch-Site"] = context.Request.Headers["Sec-Fetch-Site"].ToString();
                     context.Response.Headers["X-Test-Refresh-Cookie"] = context.Request.Cookies.Keys.Any(key => key.Contains("umbRefreshToken", StringComparison.Ordinal)) ? "yes" : "no";
                 }
 
                 await nextRequest(context);
             });
-            // Also exercise the PathBase supplied by an IIS child application, without needing IIS.
+            // Set the path base as an IIS child application does, so the tests cover that host without IIS.
             if (options.ExistingPathBase)
                 app.UsePathBase(options.Prefix);
             if (options.Host == TestHost.ReverseProxy)
             {
                 app.Use(async (context, nextRequest) =>
                 {
-                    // Model a trusted TLS-terminating proxy forwarding to an HTTP backend with
-                    // a different Host and the public prefix stripped from the request target.
+                    // Model a trusted TLS-terminating proxy that forwards to an HTTP backend with a different host and
+                    // removes the public prefix from the request path.
                     context.Request.Headers["X-Forwarded-Host"] = context.Request.Host.Value;
                     context.Request.Headers["X-Forwarded-Proto"] = context.Request.Scheme;
                     context.Request.Headers["X-Forwarded-Prefix"] = context.Request.Path.Value![..options.Prefix.Length];

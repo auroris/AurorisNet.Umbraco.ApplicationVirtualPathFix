@@ -1,9 +1,17 @@
 BeforeAll {
     $sourceScript = Join-Path $PSScriptRoot 'Get-ReleaseVersion.ps1'
+    <#
+    .SYNOPSIS
+    Runs git with the given arguments, discards its output, and throws when git fails.
+    #>
     function Invoke-Git {
         & git @args 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Git failed: $args" }
     }
+    <#
+    .SYNOPSIS
+    Creates an empty commit in the fixture repository and returns its hash.
+    #>
     function New-Commit {
         Invoke-Git commit --allow-empty -m fixture
         return git rev-parse HEAD

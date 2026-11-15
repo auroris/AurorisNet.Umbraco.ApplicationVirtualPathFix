@@ -8,10 +8,16 @@ using Umbraco.Cms.Web.Common.Hosting;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 
-/// <summary>Prepares corrected assets once, before Umbraco's static-file middleware is built.</summary>
+/// <summary>
+/// Serves patched copies of Umbraco's backoffice files from the web root. The copies are prepared once, before Umbraco's
+/// static-file middleware is built.
+/// </summary>
 internal sealed class BackOfficeAssetFileProvider : IFileProvider
 {
-    /// <summary>When the package's source was committed, or <see cref="DateTimeOffset.MinValue"/> for a build outside Git.</summary>
+    /// <summary>
+    /// The time of the commit the package was built from, or <see cref="DateTimeOffset.MinValue"/> when the build
+    /// could not read it.
+    /// </summary>
     internal static readonly DateTimeOffset SourceTimestamp = DateTimeOffset.TryParse(
         typeof(BackOfficeAssetFileProvider).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(attribute => attribute.Key == "SourceTimestamp")?.Value,
@@ -20,14 +26,23 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
     private readonly IFileProvider _inner;
     private readonly Dictionary<string, IFileInfo> _patched = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Patches each file in <see cref="BackOfficeAssetPatches.Patches"/> for the site's paths and keeps the results in
+    /// memory.
+    /// </summary>
+    /// <param name="inner">The web root's file provider, which supplies Umbraco's files and serves every other file.</param>
+    /// <param name="paths">The site's backoffice paths, which the patched files refer to.</param>
+    /// <param name="prefix">The application virtual path, such as <c>/portal</c>.</param>
+    /// <param name="logger">Receives a warning for each file or change that could not be patched.</param>
+    /// <param name="status">Records the number of patched files and each problem for the health check, when supplied.</param>
     public BackOfficeAssetFileProvider(IFileProvider inner, IBackOfficePathGenerator paths, string prefix, ILogger logger,
         VirtualPathStatus? status = null)
     {
         _inner = inner;
-        var context = new BackOfficeAssetPatches.PatchContext(prefix, paths.BackOfficePath, paths.BackOfficeAssetsPath);
+        var context = new PatchContext(prefix, paths.BackOfficePath, paths.BackOfficeAssetsPath);
         foreach (var patch in BackOfficeAssetPatches.Patches)
         {
-            var files = BackOfficeAssetPatches.Locate(inner, patch);
+            var files = AssetPatcher.Locate(inner, patch);
             if (files.Length != 1)
             {
                 logger.LogWarning("Expected one Umbraco file for {Path}, found {Count}. The application virtual path fix cannot patch it.",
@@ -37,16 +52,18 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
             }
 
             var (path, file) = files[0];
-            // Physical files open unbuffered, so read in large blocks: StreamReader's 1 KB default made
-            // reading the patched bundles most of their preparation time.
+            // Physical files open unbuffered, so read them in 64 KB blocks. With StreamReader's 1 KB default, reading
+            // took most of the preparation time.
             using var reader = new StreamReader(file.CreateReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 16);
-            var bytes = Encoding.UTF8.GetBytes(BackOfficeAssetPatches.Patch(patch, reader.ReadToEnd(), context, Unapplied));
-            // Cache validators must change with the bytes, yet agree across restarts and servers. New bytes come
-            // from a newer Umbraco file or package, and a different application path changes the URL instead.
+            var bytes = Encoding.UTF8.GetBytes(AssetPatcher.Patch(patch, reader.ReadToEnd(), context, Unapplied));
+            // Cache validators must change with the bytes and agree across restarts and servers. New bytes come only
+            // from a newer Umbraco file or package, so use the later of their times. A different application path
+            // changes the URL instead.
             _patched.Add(path, new PatchedFile(file.Name, bytes, file.LastModified > SourceTimestamp ? file.LastModified : SourceTimestamp));
         }
         status?.AssetsPrepared(_patched.Count);
 
+        // Logs a change that could not be applied and records it for the health check.
         void Unapplied(string resource, string reason)
         {
             logger.LogWarning(
@@ -57,13 +74,23 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
         }
     }
 
+    /// <summary>
+    /// Returns the patched copy of the file at <paramref name="subpath"/> when one was prepared, and otherwise the web
+    /// root's file.
+    /// </summary>
     public IFileInfo GetFileInfo(string subpath)
         => _patched.TryGetValue("/" + subpath.TrimStart('/'), out var file) ? file : _inner.GetFileInfo(subpath);
 
+    /// <summary>Returns the web root's directory listing, which describes the original files.</summary>
     public IDirectoryContents GetDirectoryContents(string subpath) => _inner.GetDirectoryContents(subpath);
 
+    /// <summary>
+    /// Watches the web root's files. The patched copies stay as prepared at startup, so a changed Umbraco file takes
+    /// effect after a restart.
+    /// </summary>
     public IChangeToken Watch(string filter) => _inner.Watch(filter);
 
+    /// <summary>A patched copy of an Umbraco file, held in memory.</summary>
     private sealed class PatchedFile(string name, byte[] bytes, DateTimeOffset modified) : IFileInfo
     {
         public bool Exists => true;
@@ -71,8 +98,11 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
         public string Name => name;
         public long Length => bytes.LongLength;
         public DateTimeOffset LastModified => modified;
-        // A physical path would let SendFile bypass CreateReadStream and send the original bytes.
+        // The static-file middleware sends a file with a physical path straight from disk, which would serve the
+        // original bytes. Null makes it read CreateReadStream.
         public string? PhysicalPath => null;
+
+        /// <summary>Opens a read-only stream over the patched bytes.</summary>
         public Stream CreateReadStream() => new MemoryStream(bytes, writable: false);
     }
 }
