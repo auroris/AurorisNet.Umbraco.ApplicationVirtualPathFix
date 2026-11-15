@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.FileProviders;
+using Umbraco.Cms.Core.Semver;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 
@@ -14,11 +15,24 @@ internal static partial class AssetPatcher
     internal const string HashPattern = "-????????";
 
     /// <summary>
-    /// Returns the patch for the web root file at <paramref name="path"/>, whatever its build hash, or
-    /// <see langword="null"/> when the package serves the file unchanged.
+    /// Returns <paramref name="version"/> as the release number entries compare with, such as 18.2.1. A prerelease
+    /// counts as the release it precedes.
     /// </summary>
-    internal static AssetPatch? For(string path)
-        => Array.Find(BackOfficeAssetPatches.Patches, patch => string.Equals(patch.Path, NormalizePath(path), StringComparison.OrdinalIgnoreCase));
+    internal static Version Release(SemVersion version) => new(version.Major, version.Minor, version.Patch);
+
+    /// <summary>
+    /// Returns the entries of <see cref="BackOfficeAssetPatches.Patches"/> that apply to the Umbraco release
+    /// <paramref name="umbraco"/>, in list order.
+    /// </summary>
+    internal static AssetPatch[] For(Version umbraco) => Array.FindAll(BackOfficeAssetPatches.Patches, patch => patch.AppliesTo(umbraco));
+
+    /// <summary>
+    /// Returns the entries that apply to the web root file at <paramref name="path"/>, whatever its build hash, for the
+    /// Umbraco release <paramref name="umbraco"/>, in list order. An empty result means the package serves the file
+    /// unchanged.
+    /// </summary>
+    internal static AssetPatch[] For(string path, Version umbraco)
+        => Array.FindAll(For(umbraco), patch => string.Equals(patch.Path, NormalizePath(path), StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Finds the files in <paramref name="files"/> that <paramref name="patch"/> applies to, with their paths. A path
@@ -39,6 +53,13 @@ internal static partial class AssetPatcher
     /// hash before <c>.js</c> matches, so a stable file and a hashed chunk with the same stem keep different paths.
     /// </summary>
     internal static string NormalizePath(string path) => BundleHash().Replace(path, HashPattern);
+
+    /// <summary>
+    /// Applies <paramref name="patches"/> to <paramref name="source"/> in order, as <see cref="Patch(AssetPatch, string,
+    /// PatchContext, Action{string, string})"/> applies each one.
+    /// </summary>
+    internal static string Patch(IEnumerable<AssetPatch> patches, string source, PatchContext context, Action<string, string> unapplied)
+        => patches.Aggregate(source, (patched, patch) => Patch(patch, patched, context, unapplied));
 
     /// <summary>
     /// Applies <paramref name="patch"/> to <paramref name="source"/> for the paths in <paramref name="context"/>: moves

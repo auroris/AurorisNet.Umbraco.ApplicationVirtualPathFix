@@ -9,9 +9,9 @@
     <Title>Umbraco Application Virtual Path Fix</Title>
     <!-- The release workflow supplies the revision. Local packs keep revision 0, which is never published, so they
          cannot shadow a release in NuGet's cache. -->
-    <Version>$(UmbracoVersion).0</Version>
+    <Version>$(UmbracoMaximumVersion).0</Version>
     <Authors>Auroris</Authors>
-    <Description>Fixes application virtual path hosting, backoffice assets, media, login and initial token refresh in Umbraco $(UmbracoVersion). Registers automatically through Umbraco startup.</Description>
+    <Description>Fixes application virtual path hosting, backoffice assets, media, login and initial token refresh in Umbraco $(UmbracoMinimumVersion) to $(UmbracoMaximumVersion). Registers automatically through Umbraco startup.</Description>
     <PackageTags>umbraco;umbraco-marketplace;virtual-path;backoffice</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -26,21 +26,30 @@
          resolve, mismatched parameter names and undocumented public members. The package includes the file, which
          gives IntelliSense for the public API. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- The package compiles against the oldest supported Umbraco release, whose own dependencies can carry advisories
+         that later releases fixed. A site restores the dependencies of its own Umbraco release, so audit only the
+         packages this project references. The test project audits the whole graph of the release it runs. -->
+    <NuGetAuditMode>direct</NuGetAuditMode>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <!--
       Reference the Umbraco packages the package uses rather than the Umbraco.Cms meta-package, so sites that
-      assemble Umbraco from individual packages (for example with ImageSharp2) can install it. Umbraco.Cms.StaticAssets
-      carries the backoffice scripts the package patches, so its exact version matters most. Verify the patches
-      before supporting another Umbraco version.
+      assemble Umbraco from individual packages (for example with ImageSharp2) can install it. The range covers only
+      releases the tests have passed, so restore stops a site on any other release. NuGet compiles the package against
+      the oldest release in the range, which keeps it to APIs every supported release has. Umbraco.Cms.StaticAssets
+      carries the backoffice scripts the package patches, so add a release to the range only after its tests pass.
     -->
-    <PackageReference Include="Umbraco.Cms.Web.Common" Version="[$(UmbracoVersion)]" />
-    <PackageReference Include="Umbraco.Cms.StaticAssets" Version="[$(UmbracoVersion)]" />
+    <PackageReference Include="Umbraco.Cms.Web.Common" Version="[$(UmbracoMinimumVersion), $(UmbracoMaximumVersion)]" />
+    <PackageReference Include="Umbraco.Cms.StaticAssets" Version="[$(UmbracoMinimumVersion), $(UmbracoMaximumVersion)]" />
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>UmbracoVersion</_Parameter1>
-      <_Parameter2>$(UmbracoVersion)</_Parameter2>
+      <_Parameter1>UmbracoMinimumVersion</_Parameter1>
+      <_Parameter2>$(UmbracoMinimumVersion)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UmbracoMaximumVersion</_Parameter1>
+      <_Parameter2>$(UmbracoMaximumVersion)</_Parameter2>
     </AssemblyAttribute>
     <Using Include="Microsoft.AspNetCore.Builder" />
     <Using Include="Microsoft.AspNetCore.Http" />
@@ -48,8 +57,8 @@
     <Using Include="Microsoft.Extensions.DependencyInjection" />
     <Using Include="Umbraco.Extensions" />
     <!-- nuget.org renders Markdown without HTML or relative links, so the package has its own README. -->
-    <None Include="../../docs/NUGET.md" Pack="true" PackagePath="README.md" />
-    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
+    <None Include="../docs/NUGET.md" Pack="true" PackagePath="README.md" />
+    <None Include="../LICENSE" Pack="true" PackagePath="/" />
     <Content Update="appsettings-schema*.json;umbraco-package-schema.json" Pack="false" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
   </ItemGroup>
   <!--

@@ -13,6 +13,18 @@ internal sealed class AssetPatch
     internal required string Path { get; init; }
 
     /// <summary>
+    /// The first Umbraco release the entry applies to, such as <c>18.2.0</c>. Without it, the entry applies from the
+    /// oldest supported release.
+    /// </summary>
+    internal string? From { get; init; }
+
+    /// <summary>
+    /// The first Umbraco release the entry no longer applies to, such as <c>18.3.0</c>. Without it, the entry applies up
+    /// to the newest supported release.
+    /// </summary>
+    internal string? Before { get; init; }
+
+    /// <summary>
     /// A source file the bundle is built from. The tests check it against the bundle's source map and use it to find
     /// the bundle again when Umbraco renames it.
     /// </summary>
@@ -30,8 +42,16 @@ internal sealed class AssetPatch
     /// <summary>Code placed at the start of the first line, followed by a space, so the file keeps its line numbers.</summary>
     internal string? Preamble { get; init; }
 
-    /// <summary>Returns the file's path, which identifies the patch in test names and messages.</summary>
-    public override string ToString() => Path;
+    /// <summary>Returns whether the entry applies to the Umbraco release <paramref name="umbraco"/>, such as 18.2.1.</summary>
+    internal bool AppliesTo(Version umbraco)
+        => (From is null || umbraco >= Version.Parse(From)) && (Before is null || umbraco < Version.Parse(Before));
+
+    /// <summary>
+    /// Returns the file's path, followed by the entry's releases when it has them, as in
+    /// <c>/umbraco/backoffice/packages/block/chunk-????????.js [18.2.0, 18.3.0)</c>. It identifies the patch in test names
+    /// and messages.
+    /// </summary>
+    public override string ToString() => From is null && Before is null ? Path : $"{Path} [{From}, {Before})";
 }
 
 /// <summary>Replaces code of a known shape when it occurs the expected number of times.</summary>

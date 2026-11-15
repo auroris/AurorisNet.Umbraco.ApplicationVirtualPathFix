@@ -17,8 +17,13 @@
     <PackageReference Include="Umbraco.Cms" />
     <PackageReference Include="Umbraco.Cms.DevelopmentMode.Backoffice" />
     <PackageReference Include="Umbraco.TheStarterKit" />
-    <ProjectReference Include="../../src/AurorisNet.Umbraco.ApplicationVirtualPathFix/AurorisNet.Umbraco.ApplicationVirtualPathFix.csproj" />
+    <ProjectReference Include="../../src/AurorisNet.Umbraco.ApplicationVirtualPathFix.csproj" />
     <Using Include="Xunit" />
+    <!-- The supported releases, which SupportedReleasesTests checks against the package and the patch list. -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>UmbracoReleases</_Parameter1>
+      <_Parameter2>$(UmbracoReleases)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
   <ItemGroup>
     <!--

@@ -9,19 +9,20 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 /// </summary>
 public sealed class PatchOriginTests(AssetPatchTests.Assets assets) : IClassFixture<AssetPatchTests.Assets>
 {
-    /// <summary>The path of every patch, one test case each.</summary>
-    public static TheoryData<string> Patches => new(BackOfficeAssetPatches.Patches.Select(patch => patch.Path));
+    /// <summary>The entries that apply to the Umbraco release under test, one test case each, named as in test output.</summary>
+    public static TheoryData<string> Patches => new(UmbracoUnderTest.Patches.Select(patch => patch.ToString()));
 
     /// <summary>
-    /// Checks that the patch for <paramref name="path"/> finds one file built from the source the patch names, and that
-    /// every match of each edit was generated from the source line the edit names. A hashed bundle must name a source,
-    /// and only a file without a source map may have edits that name no line.
+    /// Checks that <paramref name="entry"/> finds one file built from the source the entry names, and that every match
+    /// of each edit was generated from the source line the edit names. A hashed bundle must name a source, and only a
+    /// file without a source map may have edits that name no line.
     /// </summary>
     [Theory]
     [MemberData(nameof(Patches))]
-    public async Task Patch_changes_the_Umbraco_source_it_names(string path)
+    public async Task Patch_changes_the_Umbraco_source_it_names(string entry)
     {
-        var patch = BackOfficeAssetPatches.Patches.Single(patch => patch.Path == path);
+        var patch = UmbracoUnderTest.Patches.Single(patch => patch.ToString() == entry);
+        var path = patch.Path;
         var files = AssetPatcher.Locate(assets.Files, patch);
         if (files.Length != 1)
             Assert.Fail($"Expected one Umbraco file for {path}, found {files.Length}. {await WhereSourcesAreAsync(patch)}");

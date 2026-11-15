@@ -82,7 +82,7 @@ public sealed class UrlTests
                 ["https://cdn.test/"] = new() { ["dependency"] = "//cdn.test/dependency.js" },
             },
         };
-        var service = new ApplicationVirtualPathFixComposer.VirtualPathImportMapService(new Manifests(source), new TestBackOfficePaths("/portal"));
+        var service = new VirtualPathImportMapService(new Manifests(source), new TestBackOfficePaths("/portal"));
 
         var result = await service.GetPackageManifestImportmapAsync();
 
@@ -124,7 +124,7 @@ public sealed class UrlTests
                 ["plugin"] = "/App_Plugins/Example/main.js",
             },
         };
-        var service = new ApplicationVirtualPathFixComposer.VirtualPathImportMapService(new Manifests(source), new TestBackOfficePaths(""));
+        var service = new VirtualPathImportMapService(new Manifests(source), new TestBackOfficePaths(""));
 
         var result = await service.GetPackageManifestImportmapAsync();
 

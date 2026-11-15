@@ -34,8 +34,8 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
                 // Remove only the known diagnostic constant, so any other URL added to this file still fails the test.
                 source = source.Replace("const U = \"/umbraco/backoffice/\";", "", StringComparison.Ordinal);
             }
-            else if (AssetPatcher.For(path) is { } patch)
-                source = AssetPatcher.Patch(patch, source, Context, Unapplied);
+            else if (AssetPatcher.For(path, UmbracoUnderTest.Release) is { Length: > 0 } patches)
+                source = AssetPatcher.Patch(patches, source, Context, Unapplied);
             foreach (Match match in references.Matches(source))
                 unexpected.Add($"{path}:{source.AsSpan(0, match.Index).Count('\n') + 1}: {match.Value}");
         }
@@ -55,6 +55,7 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
         // against the source maps, or when its bundle has its asset URLs moved. Every review must still match a line;
         // a review without one means Umbraco changed that code.
         var sources = await ReadSourcesAsync();
+        var reviews = Reviews.Where(review => review.AppliesTo(UmbracoUnderTest.Release)).ToArray();
         var unexpected = new List<string>();
         var found = new HashSet<ReviewedLine>();
         foreach (var (file, (text, bundles)) in sources)
@@ -66,7 +67,7 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
                 if (line.StartsWith("//", StringComparison.Ordinal) || line.StartsWith("/*", StringComparison.Ordinal)
                     || line.StartsWith('*') || !ConstructsUrl(line, file) || IsPatched(file, line, bundles))
                     continue;
-                if (Reviews.FirstOrDefault(review => review.File == file && line.Contains(review.Code, StringComparison.Ordinal)) is { } known)
+                if (reviews.FirstOrDefault(review => review.File == file && line.Contains(review.Code, StringComparison.Ordinal)) is { } known)
                     found.Add(known);
                 else
                     unexpected.Add($"{file}:{index + 1}: {line}");
@@ -75,7 +76,7 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
 
         Assert.True(sources.Count > 1000, $"Expected Umbraco's sources from the restored source maps, found {sources.Count}.");
         Assert.True(unexpected.Count == 0, "Patch or review these URL constructions:\n" + string.Join('\n', unexpected));
-        var missing = Reviews.Where(review => !found.Contains(review)).Select(review => $"{review.File}: {review.Code}").ToArray();
+        var missing = reviews.Where(review => !found.Contains(review)).Select(review => $"{review.File}: {review.Code}").ToArray();
         Assert.True(missing.Length == 0, "Umbraco no longer contains these reviewed lines; check whether the review still applies:\n"
             + string.Join('\n', missing));
     }
@@ -95,19 +96,25 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
             || (!file.EndsWith(".gen.ts", StringComparison.Ordinal) && RootPath().IsMatch(line));
 
     /// <summary>
-    /// Returns whether a patch changes <paramref name="line"/>: an edit names it, or it contains a quoted asset URL and
-    /// one of its <paramref name="bundles"/> has its asset URLs moved.
+    /// Returns whether a patch for the Umbraco release under test changes <paramref name="line"/>: an edit names it, or
+    /// it contains a quoted asset URL and one of its <paramref name="bundles"/> has its asset URLs moved.
     /// </summary>
     private static bool IsPatched(string file, string line, IEnumerable<string> bundles)
-        => BackOfficeAssetPatches.Patches.SelectMany(patch => patch.Edits).Any(edit =>
+        => UmbracoUnderTest.Patches.SelectMany(patch => patch.Edits).Any(edit =>
                 edit.Origin is { } origin && origin.File == file && line.Contains(origin.Code, StringComparison.Ordinal))
             || (AssetPatcher.QuotedAssetRoot().IsMatch(line)
-                && bundles.Any(bundle => AssetPatcher.For(bundle) is { MovesAssetUrls: true }));
+                && bundles.Any(bundle => AssetPatcher.For(bundle, UmbracoUnderTest.Release).Any(patch => patch.MovesAssetUrls)));
 
     /// <summary>
-    /// A line of Umbraco's source that needs no patch: its file, a fragment of its code, and the reason.
+    /// A line of Umbraco's source that needs no patch: its file, a fragment of its code, and the reason. <c>From</c> and
+    /// <c>Before</c> limit the review to the Umbraco releases whose source contains the line, as they limit patches.
     /// </summary>
-    private sealed record ReviewedLine(string File, string Code, string Reason);
+    private sealed record ReviewedLine(string File, string Code, string Reason, string? From = null, string? Before = null)
+    {
+        /// <summary>Returns whether the review applies to the Umbraco release <paramref name="umbraco"/>.</summary>
+        public bool AppliesTo(Version umbraco)
+            => (From is null || umbraco >= Version.Parse(From)) && (Before is null || umbraco < Version.Parse(Before));
+    }
 
     private static readonly ReviewedLine[] Reviews =
     [
@@ -134,11 +141,11 @@ public sealed partial class AssetCoverageTests(AssetPatchTests.Assets assets) : 
         new("src/packages/core/workspace/utils/check-will-navigate-away.function.ts", "new URL(newUrl, window.location.origin)",
             "Compares two pathnames on this origin, which both include the virtual path."),
         new("src/packages/documents/document-redirect-management/dashboard-redirect-management.element.ts",
-            "url.slice(window.location.origin.length)", "Shortens a URL for display."),
+            "url.slice(window.location.origin.length)", "Shortens a URL for display.", From: "18.3.0"),
         new("src/packages/documents/documents/user-permissions/document/repository/document-permission.server.data.ts",
             "fetch(`/umbraco/management/api/v1/document/${id}/permissions`",
             "Registered but not called by the backoffice; without a bearer token it fails at the root too."),
-        new("src/packages/media/media/url/info-app/media-link.function.ts", "new URL(url, base)", "Reads only the protocol."),
+        new("src/packages/media/media/url/info-app/media-link.function.ts", "new URL(url, base)", "Reads only the protocol.", From: "18.2.2"),
         new("src/packages/packages/package/repository/package.repository.ts", "`${serverUrl}${e.",
             "Package manifests use application-relative paths."),
         new("src/packages/preview/context/preview.context.ts", "new URL(`${url.pathname}?${params.toString()}`, host)",

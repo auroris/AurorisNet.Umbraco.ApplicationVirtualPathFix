@@ -61,7 +61,8 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
     public async Task Patched_assets_and_rendered_html_use_normal_response_compression(CompressionOrder compression)
     {
         await using var app = CreateApp();
-        app.Environment.WebRootFileProvider = new BackOfficeAssetFileProvider(assets.Files, new TestBackOfficePaths("/portal"), "/portal", NullLogger.Instance);
+        app.Environment.WebRootFileProvider = new BackOfficeAssetFileProvider(assets.Files, new TestBackOfficePaths("/portal"), "/portal",
+            UmbracoUnderTest.Release, NullLogger.Instance);
         app.UsePathBase("/portal");
         if (compression == CompressionOrder.Before) app.UseResponseCompression();
         app.UseUmbracoPathsUnderPathBase();
@@ -98,24 +99,30 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
     }
 
     /// <summary>
-    /// Checks that startup logs one warning naming both versions when the site runs a different Umbraco version, and
-    /// none when the versions match.
+    /// Checks that startup logs one warning naming the supported releases and the site's release when the site runs an
+    /// Umbraco release newer or older than the supported range, and none for the release under test.
     /// </summary>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Startup_warns_only_for_a_different_Umbraco_version(bool differentVersion)
+    [InlineData("supported")]
+    [InlineData("newer")]
+    [InlineData("older")]
+    public void Startup_warns_only_for_an_unsupported_Umbraco_release(string release)
     {
-        var installed = new UmbracoVersion().Version;
-        var actual = differentVersion ? new Version(installed.Major, installed.Minor, installed.Build + 1) : installed;
+        var supported = UmbracoUnderTest.SupportedReleases;
+        var actual = release switch
+        {
+            "newer" => new Version(supported[^1].Major, supported[^1].Minor, supported[^1].Build + 1),
+            "older" => new Version(supported[0].Major - 1, 0, 0),
+            _ => UmbracoUnderTest.Release,
+        };
         using var logger = new RecordedLogs();
         using var services = new ServiceCollection().AddLogging(logging => logging.AddProvider(logger))
             .AddSingleton<IUmbracoVersion>(new TestUmbracoVersion(actual)).BuildServiceProvider();
-        ApplicationVirtualPathFixComposer.WarnOnUmbracoVersionMismatch(services);
-        Assert.Equal(differentVersion ? 1 : 0, logger.Warnings.Count);
-        if (differentVersion)
+        ApplicationVirtualPathFixComposer.WarnOnUnsupportedUmbracoVersion(services);
+        Assert.Equal(release == "supported" ? 0 : 1, logger.Warnings.Count);
+        if (release != "supported")
         {
-            Assert.Contains(installed.ToString(), logger.Warnings.Single());
+            Assert.Contains(ApplicationVirtualPathFixComposer.SupportedUmbracoVersions!, logger.Warnings.Single());
             Assert.Contains(actual.ToString(), logger.Warnings.Single());
         }
     }

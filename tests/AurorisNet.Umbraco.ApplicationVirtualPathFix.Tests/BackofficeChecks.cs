@@ -149,10 +149,10 @@ public sealed partial class SiteEndToEndTests
         var files = site.Services.GetRequiredService<IWebHostEnvironment>().WebRootFileProvider;
         var root = site.Services.GetRequiredService<IBackOfficePathGenerator>().BackOfficeAssetsPath;
         var backOffice = AssetPatcher.AssetsRoot + "/";
-        var paths = BackOfficeAssetPatches.Patches.Where(patch => patch.Path.StartsWith(backOffice, StringComparison.Ordinal))
-            .Select(patch => Assert.Single(AssetPatcher.Locate(files, patch)).Path)
+        var patches = UmbracoUnderTest.Patches.Where(patch => patch.Path.StartsWith(backOffice, StringComparison.Ordinal)).ToArray();
+        var paths = patches.Select(patch => Assert.Single(AssetPatcher.Locate(files, patch)).Path).Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(path => root + path[AssetPatcher.AssetsRoot.Length..]).ToArray();
-        Assert.Equal(BackOfficeAssetPatches.Patches.Count(patch => patch.Path.StartsWith(backOffice, StringComparison.Ordinal)), paths.Length);
+        Assert.Equal(patches.Select(patch => patch.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count(), paths.Length);
         await page.EvaluateAsync("""
             async paths => {
               for (const path of paths.filter(path => path.endsWith('.js'))) {

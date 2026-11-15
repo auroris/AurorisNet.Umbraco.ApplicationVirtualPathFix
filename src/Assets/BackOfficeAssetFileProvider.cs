@@ -27,35 +27,45 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
     private readonly Dictionary<string, IFileInfo> _patched = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Patches each file in <see cref="BackOfficeAssetPatches.Patches"/> for the site's paths and keeps the results in
-    /// memory.
+    /// Patches each file that the entries of <see cref="BackOfficeAssetPatches.Patches"/> for the site's Umbraco release
+    /// name, for the site's paths, and keeps the results in memory. A file named by several entries gets them all, in
+    /// list order.
     /// </summary>
     /// <param name="inner">The web root's file provider, which supplies Umbraco's files and serves every other file.</param>
     /// <param name="paths">The site's backoffice paths, which the patched files refer to.</param>
     /// <param name="prefix">The application virtual path, such as <c>/portal</c>.</param>
+    /// <param name="umbraco">The site's Umbraco release, such as 18.2.1, which selects the entries that apply.</param>
     /// <param name="logger">Receives a warning for each file or change that could not be patched.</param>
     /// <param name="status">Records the number of patched files and each problem for the health check, when supplied.</param>
-    public BackOfficeAssetFileProvider(IFileProvider inner, IBackOfficePathGenerator paths, string prefix, ILogger logger,
+    public BackOfficeAssetFileProvider(IFileProvider inner, IBackOfficePathGenerator paths, string prefix, Version umbraco, ILogger logger,
         VirtualPathStatus? status = null)
     {
         _inner = inner;
         var context = new PatchContext(prefix, paths.BackOfficePath, paths.BackOfficeAssetsPath);
-        foreach (var patch in BackOfficeAssetPatches.Patches)
+        var files = new Dictionary<string, (IFileInfo File, List<AssetPatch> Patches)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var patch in AssetPatcher.For(umbraco))
         {
-            var files = AssetPatcher.Locate(inner, patch);
-            if (files.Length != 1)
+            var found = AssetPatcher.Locate(inner, patch);
+            if (found.Length != 1)
             {
                 logger.LogWarning("Expected one Umbraco file for {Path}, found {Count}. The application virtual path fix cannot patch it.",
-                    patch.Path, files.Length);
-                status?.Problem($"Expected one Umbraco file for {patch.Path}, found {files.Length}, so it is not patched.");
+                    patch.Path, found.Length);
+                status?.Problem($"Expected one Umbraco file for {patch.Path}, found {found.Length}, so it is not patched.");
                 continue;
             }
 
-            var (path, file) = files[0];
+            var (path, file) = found[0];
+            if (!files.TryGetValue(path, out var entry))
+                files[path] = entry = (file, []);
+            entry.Patches.Add(patch);
+        }
+
+        foreach (var (path, (file, patches)) in files)
+        {
             // Physical files open unbuffered, so read them in 64 KB blocks. With StreamReader's 1 KB default, reading
             // took most of the preparation time.
             using var reader = new StreamReader(file.CreateReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1 << 16);
-            var bytes = Encoding.UTF8.GetBytes(AssetPatcher.Patch(patch, reader.ReadToEnd(), context, Unapplied));
+            var bytes = Encoding.UTF8.GetBytes(AssetPatcher.Patch(patches, reader.ReadToEnd(), context, Unapplied));
             // Cache validators must change with the bytes and agree across restarts and servers. New bytes come only
             // from a newer Umbraco file or package, so use the later of their times. A different application path
             // changes the URL instead.
@@ -68,7 +78,7 @@ internal sealed class BackOfficeAssetFileProvider : IFileProvider
         {
             logger.LogWarning(
                 "Umbraco's {Resource} {Reason}, so that part of the application virtual path fix is not applied. "
-                + "Install the AurorisNet.Umbraco.ApplicationVirtualPathFix release that matches this site's Umbraco version.",
+                + "Install an AurorisNet.Umbraco.ApplicationVirtualPathFix release that supports this site's Umbraco version.",
                 resource, reason);
             status?.Problem($"Umbraco's {resource} {reason}, so that part of the fix is not applied.");
         }

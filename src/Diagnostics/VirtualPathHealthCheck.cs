@@ -5,9 +5,9 @@ using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 
 /// <summary>
-/// Reports the fix's status under Settings → Health Check: whether the Umbraco version matches, whether requests arrive
-/// with the configured path base, whether every patch applied, and whether requests reached the site outside the
-/// virtual path.
+/// Reports the fix's status under Settings → Health Check: whether the package supports the Umbraco version, whether
+/// requests arrive with the configured path base, whether every patch applied, and whether requests reached the site
+/// outside the virtual path.
 /// </summary>
 [HealthCheck(CheckId, "Application virtual path", Description = "Checks the fixes for hosting the site under an application virtual path.",
     Group = "Configuration")]
@@ -32,10 +32,10 @@ internal sealed class VirtualPathHealthCheck(VirtualPathStatus status, IHostingE
     /// </summary>
     private IEnumerable<HealthCheckStatus> Check()
     {
-        yield return ApplicationVirtualPathFixComposer.MismatchedUmbracoVersion(umbraco) is { } built
-            ? Status(StatusResultType.Warning, $"The package was built for Umbraco {built}, but the site runs Umbraco {umbraco.SemanticVersion}. "
-                + "Install the package release for the site's Umbraco version.")
-            : Status(StatusResultType.Success, $"The package matches the site's Umbraco version, {umbraco.SemanticVersion}.");
+        yield return ApplicationVirtualPathFixComposer.SupportsUmbraco(umbraco)
+            ? Status(StatusResultType.Success, $"The package supports the site's Umbraco version, {umbraco.SemanticVersion}.")
+            : Status(StatusResultType.Warning, $"The package supports Umbraco {ApplicationVirtualPathFixComposer.SupportedUmbracoVersions}, "
+                + $"but the site runs Umbraco {umbraco.SemanticVersion}. Install a package release that supports the site's Umbraco version.");
 
         if (VirtualPathHosting.Prefix(hosting) is not { } prefix)
         {

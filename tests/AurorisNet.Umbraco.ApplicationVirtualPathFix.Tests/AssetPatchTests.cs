@@ -13,22 +13,22 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     private const string AssetsPath = "/portal/umbraco/backoffice/cache-hash";
     private static readonly PatchContext Context = new("/portal", "/portal/umbraco", AssetsPath);
 
-    /// <summary>The path of every patch, one test case each.</summary>
-    public static TheoryData<string> Patches => new(BackOfficeAssetPatches.Patches.Select(patch => patch.Path));
+    /// <summary>The entries that apply to the Umbraco release under test, one test case each, named as in test output.</summary>
+    public static TheoryData<string> Patches => new(UmbracoUnderTest.Patches.Select(patch => patch.ToString()));
 
     /// <summary>
-    /// Checks that the patch for <paramref name="path"/> finds exactly one installed file and applies every change
-    /// without changing the line count. Quoted asset URLs must move under the served asset root, and a script must parse
-    /// as JavaScript both as installed and after patching.
+    /// Checks that <paramref name="entry"/> finds exactly one installed file and applies every change without changing
+    /// the line count. Quoted asset URLs must move under the served asset root, and a script must parse as JavaScript
+    /// both as installed and after patching.
     /// </summary>
     [Theory]
     [MemberData(nameof(Patches))]
-    public async Task Every_patch_applies_to_the_installed_Umbraco_file(string path)
+    public async Task Every_patch_applies_to_the_installed_Umbraco_file(string entry)
     {
-        var patch = BackOfficeAssetPatches.Patches.Single(patch => patch.Path == path);
+        var patch = UmbracoUnderTest.Patches.Single(patch => patch.ToString() == entry);
         var files = AssetPatcher.Locate(assets.Files, patch);
         Assert.True(files.Length == 1,
-            $"Expected exactly one file for {path}; found {files.Length}: {string.Join(", ", files.Select(file => file.Path))}");
+            $"Expected exactly one file for {entry}; found {files.Length}: {string.Join(", ", files.Select(file => file.Path))}");
         var source = await ReadAsync(files[0].File);
         var patched = AssetPatcher.Patch(patch, source, Context, Unapplied);
         Assert.NotEqual(source, patched);
@@ -47,7 +47,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
             }
         }
 
-        if (path.EndsWith(".js", StringComparison.Ordinal))
+        if (patch.Path.EndsWith(".js", StringComparison.Ordinal))
         {
             AssertParses(source, files[0].Path + " as installed");
             AssertParses(patched, files[0].Path + " after patching");
@@ -55,19 +55,23 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     }
 
     /// <summary>
-    /// Checks that each file has one patch, that every preamble fits on the first line, and that every edit keeps the
-    /// number of lines it replaces, so patched files keep Umbraco's line numbers.
+    /// Checks that every preamble fits on the first line and every edit keeps the number of lines it replaces, so patched
+    /// files keep Umbraco's line numbers. For the Umbraco release under test, it also checks that no file gets its asset
+    /// URLs moved twice or more than one preamble, which a second entry for the same file could otherwise add.
     /// </summary>
     [Fact]
-    public void Patches_keep_line_numbers_and_name_each_file_once()
+    public void Patches_keep_line_numbers_and_apply_each_kind_of_change_once()
     {
-        Assert.Equal(BackOfficeAssetPatches.Patches.Length,
-            BackOfficeAssetPatches.Patches.Select(patch => patch.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         foreach (var patch in BackOfficeAssetPatches.Patches)
         {
-            Assert.False((patch.Preamble ?? "").Contains('\n'), $"{patch.Path}: the preamble must stay on the first line.");
+            Assert.False((patch.Preamble ?? "").Contains('\n'), $"{patch}: the preamble must stay on the first line.");
             foreach (var edit in patch.Edits)
-                Assert.True(edit.Find.Count('\n') == edit.Replace.Count('\n'), $"{patch.Path}: {edit} changes the number of lines.");
+                Assert.True(edit.Find.Count('\n') == edit.Replace.Count('\n'), $"{patch}: {edit} changes the number of lines.");
+        }
+        foreach (var file in UmbracoUnderTest.Patches.GroupBy(patch => patch.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            Assert.True(file.Count(patch => patch.MovesAssetUrls) <= 1, $"{file.Key}: more than one entry moves its asset URLs.");
+            Assert.True(file.Count(patch => patch.Preamble is not null) <= 1, $"{file.Key}: more than one entry adds a preamble.");
         }
     }
 
@@ -219,7 +223,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     public async Task Every_login_patch_matches_the_installed_script(string prefix)
     {
         var source = await ReadAsync(assets.Files.GetFileInfo("/umbraco/login/login.js"));
-        var patched = AssetPatcher.Patch(AssetPatcher.For("/umbraco/login/login.js")!, source,
+        var patched = AssetPatcher.Patch(AssetPatcher.For("/umbraco/login/login.js", UmbracoUnderTest.Release), source,
             Context with { PathBase = prefix, BackOfficePath = prefix + "/umbraco" }, Unapplied);
         Assert.Contains($"new Request(\"{prefix}\" + \"/umbraco/", patched, StringComparison.Ordinal);
         Assert.Contains($"window.location.origin + \"{prefix}\"", patched, StringComparison.Ordinal);
@@ -242,7 +246,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
     public async Task Website_asset_patches_match_the_installed_files(string path, string removed, string added)
     {
         var source = await ReadAsync(assets.Files.GetFileInfo(path));
-        var patched = AssetPatcher.Patch(AssetPatcher.For(path)!, source, Context, Unapplied);
+        var patched = AssetPatcher.Patch(AssetPatcher.For(path, UmbracoUnderTest.Release), source, Context, Unapplied);
         Assert.DoesNotContain(removed, patched, StringComparison.Ordinal);
         Assert.Contains(added, patched, StringComparison.Ordinal);
     }
@@ -264,7 +268,7 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
         }
     }
 
-    private static AssetPatch Manifests => AssetPatcher.For("/umbraco/backoffice/packages/core/manifests.js")!;
+    private static AssetPatch Manifests => AssetPatcher.For("/umbraco/backoffice/packages/core/manifests.js", UmbracoUnderTest.Release).Single();
 
     /// <summary>Fails the test with the reason a change could not be applied.</summary>
     private static void Unapplied(string resource, string reason) => Assert.Fail($"Umbraco's {resource} {reason}");
@@ -338,8 +342,8 @@ public sealed class AssetPatchTests(AssetPatchTests.Assets assets) : IClassFixtu
         }
 
         /// <summary>Returns the web root paths of the installed files that the patches apply to.</summary>
-        public string[] PatchedPaths() => BackOfficeAssetPatches.Patches
-            .SelectMany(patch => AssetPatcher.Locate(Files, patch)).Select(file => file.Path).ToArray();
+        public string[] PatchedPaths() => UmbracoUnderTest.Patches
+            .SelectMany(patch => AssetPatcher.Locate(Files, patch)).Select(file => file.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
         /// <summary>Disposes the web application.</summary>
         public ValueTask DisposeAsync() => _app.DisposeAsync();

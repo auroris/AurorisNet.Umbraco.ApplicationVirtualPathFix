@@ -55,10 +55,10 @@ change, and one or more for a URL rewrite. Compatibility tests check every regis
 bundle and search pattern against the installed Umbraco assets, including bundles
 the browser scenarios do not load. They also check, through Umbraco's source maps,
 that each change hits the line of Umbraco's TypeScript it names, and that every
-patched script still parses. To review every change, read
-[`BackOfficeAssetPatches.cs`](../src/AurorisNet.Umbraco.ApplicationVirtualPathFix/BackOfficeAssetPatches.cs):
-it lists each patched file with the code it finds, the code that replaces it, and a
-note on why.
+patched script still parses. To review every change, read the files in
+[`src/Patchsets`](../src/Patchsets/): `BackOfficeAssetPatches.cs` explains how to read
+an entry, and the other files list each patched file with the Umbraco releases it
+applies to, the code it finds, the code that replaces it, and a note on why.
 
 At startup, a file provider reads those installed assets and prepares patched
 copies in memory. Umbraco's static-file middleware serves them at their original

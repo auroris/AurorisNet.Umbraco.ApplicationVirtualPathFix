@@ -32,7 +32,7 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         // The build records the time of the commit the package was built from.
         Assert.NotEqual(DateTimeOffset.MinValue, BackOfficeAssetFileProvider.SourceTimestamp);
         var paths = assets.PatchedPaths();
-        Assert.Equal(BackOfficeAssetPatches.Patches.Length, paths.Length);
+        Assert.Equal(UmbracoUnderTest.Patches.Select(patch => patch.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count(), paths.Length);
         foreach (var path in paths)
         {
             var original = assets.Files.GetFileInfo(path);
@@ -74,7 +74,8 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
     {
         var login = new ChangedLogin();
         var logger = new RecordedWarnings();
-        var provider = new BackOfficeAssetFileProvider(new LoginOverride(assets.Files, login), new TestBackOfficePaths(Prefix), Prefix, logger);
+        var provider = new BackOfficeAssetFileProvider(new LoginOverride(assets.Files, login), new TestBackOfficePaths(Prefix), Prefix,
+            UmbracoUnderTest.Release, logger);
         Assert.Equal(1, login.Reads);
         Assert.Equal(3, logger.Messages.Count);
         Assert.Equal(3, logger.Messages.Distinct().Count());
@@ -143,7 +144,7 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
 
     /// <summary>Creates a provider that patches the restored assets for a site under <see cref="Prefix"/>.</summary>
     private BackOfficeAssetFileProvider CreateProvider()
-        => new(assets.Files, new TestBackOfficePaths(Prefix), Prefix, NullLogger.Instance);
+        => new(assets.Files, new TestBackOfficePaths(Prefix), Prefix, UmbracoUnderTest.Release, NullLogger.Instance);
 
     /// <summary>Reads every byte of <paramref name="file"/>.</summary>
     private static async Task<byte[]> ReadAsync(IFileInfo file)
