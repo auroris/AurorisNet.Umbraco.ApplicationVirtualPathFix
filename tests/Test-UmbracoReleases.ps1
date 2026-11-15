@@ -28,13 +28,18 @@ Where the builds, logs and temporary files go. Defaults to artifacts/umbraco-rel
 .PARAMETER Throttle
 How many test processes run at once. Defaults to the number of releases for the fast tests, so every release's fast
 tests run at once, and to half the processor count for the browser cases.
+
+.PARAMETER SummaryPath
+Also writes the results to this JSON file: one object per release with Release, Result, Tests and Failures, where
+Failures lists each failed test, prefixed with its browser case. The New Umbraco releases workflow reads it.
 #>
 param(
     [string[]] $Releases,
     [switch] $Browser,
     [string] $Configuration = 'Debug',
     [string] $ArtifactsPath,
-    [int] $Throttle = 0
+    [int] $Throttle = 0,
+    [string] $SummaryPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -136,5 +141,16 @@ $summary | Sort-Object { [version] $_.Release } | Format-Table Release, Result, 
 foreach ($outcome in $results | Where-Object Result -ne 'passed' | Sort-Object -Stable { [version] $_.Release }) {
     Write-Host "Umbraco $($outcome.Release)$($outcome.Case ? ", case $($outcome.Case)" : '') $($outcome.Result): $($outcome.Log)"
     $outcome.Failed | ForEach-Object { Write-Host "  $_" }
+}
+if ($SummaryPath) {
+    $records = foreach ($line in $summary | Sort-Object { [version] $_.Release }) {
+        $failures = foreach ($outcome in $results | Where-Object { $_.Release -eq $line.Release -and $_.Result -ne 'passed' }) {
+            $prefix = $outcome.Case ? "$($outcome.Case): " : ''
+            if ($outcome.Failed) { $outcome.Failed | ForEach-Object { "$prefix$_" } } else { "$prefix$($outcome.Result)" }
+        }
+        [pscustomobject]@{ Release = $line.Release; Result = $line.Result; Tests = $line.Tests; Failures = @($failures) }
+    }
+    New-Item -ItemType Directory -Force (Split-Path -Parent ([IO.Path]::GetFullPath($SummaryPath))) | Out-Null
+    ConvertTo-Json -InputObject @($records) -Depth 4 | Set-Content -LiteralPath $SummaryPath -Encoding utf8
 }
 exit (@($results | Where-Object Result -ne 'passed').Count -eq 0 ? 0 : 1)

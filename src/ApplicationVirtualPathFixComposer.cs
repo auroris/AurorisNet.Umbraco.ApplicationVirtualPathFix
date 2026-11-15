@@ -48,11 +48,11 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
             PrePipeline = app =>
             {
                 WarnOnUnsupportedUmbracoVersion(app.ApplicationServices);
+                var umbraco = AssetPatcher.Release(app.ApplicationServices.GetRequiredService<IUmbracoVersion>().SemanticVersion);
                 if (VirtualPathHosting.Prefix(app.ApplicationServices.GetRequiredService<IHostingEnvironment>()) is { } prefix)
                 {
                     var status = app.ApplicationServices.GetRequiredService<VirtualPathStatus>();
                     var environment = app.ApplicationServices.GetRequiredService<IWebHostEnvironment>();
-                    var umbraco = AssetPatcher.Release(app.ApplicationServices.GetRequiredService<IUmbracoVersion>().SemanticVersion);
                     environment.WebRootFileProvider = new BackOfficeAssetFileProvider(environment.WebRootFileProvider,
                         app.ApplicationServices.GetRequiredService<IBackOfficePathGenerator>(), prefix, umbraco,
                         app.ApplicationServices.GetRequiredService<ILoggerFactory>().CreateLogger(Name), status);
@@ -64,7 +64,7 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
                         return next(context);
                     });
                 }
-                app.UseUmbracoPathsUnderPathBase();
+                app.UseUmbracoPathsUnderPathBase(UmbracoMajor.For(umbraco));
             },
             PostPipeline = app => app.UseMediaUnderPathBase(),
         }));

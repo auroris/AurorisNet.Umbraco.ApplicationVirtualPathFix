@@ -80,7 +80,7 @@ no additional query parameter is needed.
 
 ## Hosting and compatibility
 
-Use the package with **Umbraco 17.5.0 to 18.3.1 on .NET 10**. It depends on that
+Use the package with **Umbraco <!-- umbraco-releases -->17.5.0 to 18.3.1<!-- /umbraco-releases --> on .NET 10**. It depends on that
 range of `Umbraco.Cms.Web.Common` and `Umbraco.Cms.StaticAssets`. Every release listed
 in `UmbracoReleases` in `Directory.Build.props` passed the fast and browser tests
 when it was added, and again after any change that might affect it. The package

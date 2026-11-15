@@ -27,7 +27,7 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
             .AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths("/portal")).BuildServiceProvider();
         var app = new ApplicationBuilder(services);
         app.UsePathBase("/portal");
-        app.UseUmbracoPathsUnderPathBase();
+        app.UseUmbracoPathsUnderPathBase(UmbracoUnderTest.Major);
         var reachedHandler = false;
         app.Run(_ => { reachedHandler = true; return Task.CompletedTask; });
         var url = new Uri("http://site.test" + path);
@@ -65,7 +65,7 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
             UmbracoUnderTest.Release, NullLogger.Instance);
         app.UsePathBase("/portal");
         app.UseResponseCompression();
-        app.UseUmbracoPathsUnderPathBase();
+        app.UseUmbracoPathsUnderPathBase(UmbracoUnderTest.Major);
         app.UseUmbracoBackOfficeRewrites();
         app.UseStaticFiles();
         app.Run(async context =>
@@ -151,7 +151,7 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         context.Request.PathBase = "/portal";
         context.Request.Path = originalPath;
         var failure = new InvalidOperationException("Downstream failure");
-        app.UseUmbracoPathsUnderPathBase();
+        app.UseUmbracoPathsUnderPathBase(UmbracoUnderTest.Major);
         app.Run(request =>
         {
             Assert.Equal("/portal" + originalPath, request.Request.Path.Value);
@@ -166,5 +166,29 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
             await pipeline(context);
         Assert.Equal(originalPath, context.Request.Path.Value);
         Assert.Equal("/portal", context.Request.PathBase.Value);
+    }
+
+    /// <summary>
+    /// Checks that the middleware gives the virtual path back to requests for the API documents of the release under
+    /// test's major version, and leaves another major version's documents path as it is.
+    /// </summary>
+    [Fact]
+    public async Task Only_the_sites_major_version_gets_its_API_documents_path_restored()
+    {
+        using var services = new ServiceCollection()
+            .AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths("/portal")).BuildServiceProvider();
+        foreach (var major in UmbracoMajor.All)
+        {
+            var app = new ApplicationBuilder(services);
+            app.UseUmbracoPathsUnderPathBase(UmbracoUnderTest.Major);
+            var seen = "";
+            app.Run(context => { seen = context.Request.Path.Value!; return Task.CompletedTask; });
+            var context = new DefaultHttpContext();
+            context.Request.PathBase = "/portal";
+            context.Request.Path = major.ApiDocuments.Add("/index.html");
+            await app.Build()(context);
+            var expected = (major == UmbracoUnderTest.Major ? "/portal" : "") + major.ApiDocuments + "/index.html";
+            Assert.Equal(expected, seen);
+        }
     }
 }

@@ -43,7 +43,7 @@ requirements and validation scope.
 
 | Package release | Umbraco | Runtime |
 |---|---|---|
-| 18.3.1.2 and later | 17.5.0 to 18.3.1 | .NET 10 |
+| 18.3.1.2 and later | <!-- umbraco-releases -->17.5.0 to 18.3.1<!-- /umbraco-releases --> | .NET 10 |
 | [18.3.1.1](https://www.nuget.org/packages/AurorisNet.Umbraco.ApplicationVirtualPathFix/18.3.1.1) | 18.3.1 | .NET 10 |
 
 The exact validated releases are listed in
@@ -58,7 +58,7 @@ branch holds the source of 18.3.1.1.
 
 ## Quick start
 
-Add the package to a website running Umbraco 17.5.0 to 18.3.1. Package versions start
+Add the package to a website running Umbraco <!-- umbraco-releases -->17.5.0 to 18.3.1<!-- /umbraco-releases -->. Package versions start
 with the newest Umbraco release they support, so the floating version `18.*` picks up
 the newest release on Umbraco 17 and 18 alike:
 

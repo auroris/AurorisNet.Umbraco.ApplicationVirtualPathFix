@@ -1,0 +1,139 @@
+name: New Umbraco releases
+
+# Looks for new releases of the Umbraco major versions the package supports each day, and runs the fast tests and the
+# browser cases on them. A release that passes gets a pull request that adds it to UmbracoReleases; one that fails gets
+# an issue. Publishing a package that lists a new release stays a manual run of the Release workflow.
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+    inputs:
+      releases:
+        description: Releases to test instead of the new ones, separated by commas, such as 18.3.2,17.8.2
+        required: false
+        default: ''
+      dry-run:
+        description: Show the results in the run only, without opening a pull request or issue
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: umbraco-releases
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  find:
+    name: Find new releases
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      releases: ${{ steps.find.outputs.releases }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REQUESTED: ${{ inputs.releases }}
+      DRY_RUN: ${{ inputs.dry-run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Find the releases to test
+        id: find
+        run: |
+          $split = [StringSplitOptions]::RemoveEmptyEntries -bor [StringSplitOptions]::TrimEntries
+          $found = & .github/scripts/Find-UmbracoReleases.ps1
+          if ($env:REQUESTED) {
+            $releases = @($env:REQUESTED.Split(',', $split))
+          }
+          else {
+            # Skip a release whose pull request branch waits for review, or whose failure issue is still open.
+            $waiting = @(git ls-remote --heads origin 'umbraco-releases/*' | ForEach-Object { ($_ -split 'refs/heads/umbraco-releases/')[1] -split '-' })
+            $failing = @(gh issue list --state open --search 'fails the tests in:title' --json title | ConvertFrom-Json |
+              ForEach-Object { if ($_.title -match '^Umbraco (\S+) fails the tests$') { $Matches[1] } })
+            $releases = @($found.Releases | Where-Object { $_ -notin $waiting -and $_ -notin $failing })
+          }
+          Write-Host "New on NuGet: $($found.Releases -join ', ')"
+          Write-Host "To test: $($releases -join ', ')"
+          "releases=$($releases -join ',')" >> $env:GITHUB_OUTPUT
+
+          # A new major version needs code changes before it can be tested, so it gets an issue instead.
+          foreach ($release in $found.NewMajors) {
+            $title = "Support Umbraco $(([version] $release).Major)"
+            $open = gh issue list --state open --search "$title in:title" --json title | ConvertFrom-Json | Where-Object title -eq $title
+            if ($open -or $env:DRY_RUN -eq 'true') { Write-Host "$title, for $($release): $($open ? 'its issue is open' : 'dry run')"; continue }
+            gh issue create --title $title --body "NuGet has Umbraco $release, a major version the package does not support yet. docs/DEVELOPING.md lists the steps to add one."
+          }
+
+  test:
+    name: Test ${{ needs.find.outputs.releases }}
+    needs: find
+    if: needs.find.outputs.releases != ''
+    runs-on: windows-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASES: ${{ needs.find.outputs.releases }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: '10.0.x'
+
+      # The tests build against the listed releases and check that the release under test is listed.
+      - name: List the releases for the tests
+        id: add
+        run: .github/scripts/Add-UmbracoRelease.ps1 -Releases $env:RELEASES
+
+      - name: Install Chromium
+        id: chromium
+        run: |
+          dotnet build tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests -nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
+
+      - name: Run the fast tests
+        if: ${{ !cancelled() && steps.add.outcome == 'success' }}
+        continue-on-error: true
+        run: pwsh tests/Test-UmbracoReleases.ps1 -Releases $env:RELEASES -SummaryPath artifacts/fast.json
+
+      - name: Run the browser cases
+        if: ${{ !cancelled() && steps.chromium.outcome == 'success' }}
+        continue-on-error: true
+        run: pwsh tests/Test-UmbracoReleases.ps1 -Releases $env:RELEASES -Browser -SummaryPath artifacts/browser.json
+
+      - name: Keep the logs, traces and screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: umbraco-releases-${{ github.run_id }}
+          path: |
+            artifacts/*.json
+            artifacts/umbraco-releases/*/*.log
+            artifacts/umbraco-releases/*/artifacts/bin/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/debug/e2e-artifacts/
+            !**/*.dmp
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Open a pull request for the releases that passed, and an issue for each that failed
+        if: ${{ !cancelled() && steps.add.outcome == 'success' }}
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          .github/scripts/Submit-UmbracoReleaseResults.ps1 -Releases $env:RELEASES -Summaries artifacts/fast.json, artifacts/browser.json `
+            -RunUrl $env:RUN_URL -DryRun:($env:DRY_RUN -eq 'true')

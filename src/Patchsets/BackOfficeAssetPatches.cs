@@ -13,13 +13,16 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 /// <see cref="AssetPatcher"/> holds the code that finds the files and applies the changes.
 /// </para>
 /// <para>
-/// The entries live in this folder, one file per area of Umbraco, and <see cref="Patches"/> joins them in the order it
-/// lists them. <c>Path</c> names a file by its path in the web root, where <c>-????????</c> stands for the build hash in
-/// a bundle's name. <c>From</c> and <c>Before</c> limit an entry to a range of Umbraco releases: it applies from
-/// <c>From</c> up to, but not including, <c>Before</c>. An entry without them applies to every supported release.
-/// Umbraco 17's later releases share code with 18's: 17.5 with 18.0, 17.6 with 18.1, 17.7 with 18.2, and 17.8 with
-/// 18.3. Release numbers order every 17.x before every 18.x, so code that both share has one entry for each major
-/// version, with the same changes. <c>Contains</c>, when set, is text the file must contain, which picks the right
+/// Entries that apply to every supported release live in this folder, one file per area of Umbraco. Entries for one
+/// major version's releases live in the subfolder named after it, such as <c>Umbraco18</c>, and stay within that major
+/// version, so supporting a new major version adds a folder rather than changing these files. <see cref="Patches"/>
+/// joins the area files in the order it lists them, then each major version's entries, oldest first.
+/// <c>Path</c> names a file by its path in the web root, where <c>-????????</c> stands for the build hash in a bundle's
+/// name. <c>From</c> and <c>Before</c> limit an entry to a range of Umbraco releases: it applies from <c>From</c> up to,
+/// but not including, <c>Before</c>. An entry without them applies to every supported release. Umbraco 17's later
+/// releases share code with 18's: 17.5 with 18.0, 17.6 with 18.1, 17.7 with 18.2, and 17.8 with 18.3. Each such entry
+/// in one major version's folder has a counterpart in the other's with the same changes, which the area files define
+/// once. <c>Contains</c>, when set, is text the file must contain, which picks the right
 /// bundle when several share the name. <c>Source</c> names a source file the bundle is built from, which the
 /// tests use to find the bundle when Umbraco renames it. An entry's changes apply in this order:
 /// </para>
@@ -49,15 +52,15 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 /// </remarks>
 internal static class BackOfficeAssetPatches
 {
-    /// <summary>Every entry, in the order the patcher reads them.</summary>
+    /// <summary>Every entry, in the order the patcher reads them: the area files, then each major version's own.</summary>
     internal static readonly AssetPatch[] Patches =
     [
         .. AssetUrlPatches.Patches,
         .. BlockEditorPatches.Patches,
         .. MediaPatches.Patches,
         .. PreviewPatches.Patches,
-        .. RichTextEditorPatches.Patches,
         .. SignInPatches.Patches,
         .. WebsitePatches.Patches,
+        .. UmbracoMajor.All.SelectMany(major => major.Patches),
     ];
 }

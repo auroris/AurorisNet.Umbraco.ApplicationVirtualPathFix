@@ -2,7 +2,7 @@
 
 Build the repository to produce `AurorisNet.Umbraco.ApplicationVirtualPathFix` for the
 Umbraco releases listed in `UmbracoReleases` in `Directory.Build.props`, currently
-17.5.0 to 18.3.1. The package depends on the range from `UmbracoMinimumVersion` to
+<!-- umbraco-releases -->17.5.0 to 18.3.1<!-- /umbraco-releases -->. The package depends on the range from `UmbracoMinimumVersion` to
 `UmbracoMaximumVersion`, so NuGet compiles it against the oldest supported release.
 The tests run against the release in `UmbracoVersion`, the newest by default. Pass
 `-p:UmbracoVersion=18.2.1`, for example, to test another, or test every supported
@@ -68,8 +68,13 @@ that do not match and public members without a comment. Keep the build free of t
 warnings. The package includes the documentation file, which gives IntelliSense for
 its public API.
 
-Every patch is an entry in one of the files in `src/Patchsets`, one file per area of
-Umbraco. `BackOfficeAssetPatches.cs` there joins them into one list and explains how
+Every patch is an entry in `src/Patchsets`. Entries that apply to every supported
+release are in the files there, one per area of Umbraco. Entries for one major
+version's releases are in that version's folder, such as `src/Patchsets/Umbraco18`,
+and stay within it, so supporting a new major version adds a folder instead of
+changing the others. When two major versions share code, as Umbraco 17's later
+releases share 18's, each folder has its own entry and the area file defines the
+edits once. `BackOfficeAssetPatches.cs` joins the entries into one list and explains how
 to read an entry. An entry names a file by its path in the web root, with `-????????`
 for a bundle's build hash, and lists its changes: it can move the file's quoted
 `/umbraco/backoffice/` URLs under the asset root, apply edits, and add a preamble to
@@ -84,6 +89,19 @@ written as raw string literals that read as they do in Umbraco's file apart from
 placeholders, and every value sits on its own labeled line. Keep new entries in the
 same layout. `src/Assets/AssetPatch.cs` defines the entries, and
 `src/Assets/AssetPatcher.cs` finds the files and applies the changes.
+
+What else the package does differently for each Umbraco major version is in
+`src/UmbracoVersions`. `UmbracoMajor` lists the supported major versions, and each has
+a subclass in a folder of its own, such as `Umbraco18/Umbraco18.cs`. The subclass names
+that version's patches and the parts of Umbraco's API it handles differently: today,
+the path where Umbraco serves its API documents, Swashbuckle's `/umbraco/swagger` in 17
+and `/umbraco/openapi` in 18. The composer picks the subclass for the site's release
+at startup. Umbraco 17 and 18 both run on .NET 10, so one build serves both and a
+subclass can use only the APIs of the oldest supported release. Code that every
+supported version handles alike stays where it is, and when a new version changes an
+API the package uses, the difference becomes a member of `UmbracoMajor` that each
+subclass implements. `SupportedReleasesTests` checks that each major version's entries
+stay within it and that the release under test has its major version's subclass.
 
 `AssetPatchTests` also checks every patch against the restored Umbraco files without
 starting a site. It fails if a path finds zero or multiple files, if a search pattern
@@ -179,19 +197,23 @@ It supplies the crop helper's services explicitly because Umbraco's convenience
 overload caches the first site's services in static readonly properties, while
 this suite boots several independent sites in one process on Umbraco 18.
 
-Run the release-script checks with Pester 5.7.1:
+Run the workflow-script checks with Pester 5.7.1:
 
 ```powershell
 Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
 Import-Module Pester -RequiredVersion 5.7.1
-Invoke-Pester .github/scripts/Get-ReleaseVersion.Tests.ps1 -CI
+Invoke-Pester .github/scripts -CI
 ```
 
-These tests create disposable Git repositories. They cover initial and subsequent
-release counts, counts that follow `UmbracoMaximumVersion` rather than the release
-the tests run against, the .NET assembly version limit, tagged retries, stale commits,
-releases from a branch other than `main`, checkouts that differ from the release
-commit, and malformed version properties. They do not tag or publish this repository.
+The release-count tests create disposable Git repositories. They cover initial and
+subsequent release counts, counts that follow `UmbracoMaximumVersion` rather than the
+release the tests run against, the .NET assembly version limit, tagged retries, stale
+commits, releases from a branch other than `main`, checkouts that differ from the
+release commit, and malformed version properties. The tests for the
+[New Umbraco releases](#new-umbraco-releases) scripts check which NuGet releases count
+as new, how a release is added to `Directory.Build.props` and the documents, and which
+releases pass when given test summaries, without calling GitHub. None of them tag,
+publish or change this repository.
 
 Clone into a short path on Windows. Playwright's package contains deeply nested
 files, and the build fails with `MSB3021` when a path exceeds 260 characters unless
@@ -219,23 +241,82 @@ every release's fast tests run at once, and browser cases half as many as the
 machine has processors, because each keeps a site and Chromium busy), and
 `-ArtifactsPath` to put the builds elsewhere. `-Browser` needs Chromium installed, as
 [Build and test](#build-and-test) shows, and `AVPF_E2E_CASE` selects its cases.
+`-SummaryPath results.json` also writes each release's result and failed tests as JSON.
+
+### New Umbraco releases
+
+The **New Umbraco releases** workflow runs every day. It looks on NuGet for stable
+releases of the supported major versions that are newer than the newest listed
+release of each, and tests them on a Windows runner with the fast tests and every
+browser case. Then it reports:
+
+- The releases that passed go on a branch named `umbraco-releases/<releases>`, added
+  with `.github/scripts/Add-UmbracoRelease.ps1`, and a pull request opens for them.
+  Merge it, then run the Release workflow to publish a package that lists them.
+  Until then, sites on those releases see the package's unsupported-release warning.
+- Each release that failed gets an issue titled `Umbraco <release> fails the tests`,
+  listing the failed tests and linking the run, whose artifacts hold the logs, traces
+  and screenshots. Close the issue once the cause is fixed, and the next run tests the
+  release again.
+- A stable release of a newer major version gets an issue titled
+  `Support Umbraco <major>`, because it needs the steps in
+  [Add an Umbraco major version](#add-an-umbraco-major-version) first.
+
+The workflow skips a release whose branch or failure issue is open. To test
+particular releases, or to see the results without opening anything, run it from
+**Actions → New Umbraco releases → Run workflow** with its inputs. GitHub lets a
+workflow open pull requests only once **Settings → Actions → General → Workflow
+permissions → Allow GitHub Actions to create and approve pull requests** is on. Until
+then, the workflow pushes the branch and opens an issue that links it. These runs are
+the only tests that run on GitHub; the Release workflow only builds and publishes.
 
 ### Add an Umbraco release
 
-1. Add the release to `UmbracoReleases` in `Directory.Build.props`. When it is the
-   newest, also set `UmbracoMaximumVersion` and `UmbracoVersion` to it; the next
-   package release is then numbered after it, starting at `<release>.1`.
+The New Umbraco releases workflow adds releases that pass without changes. A release
+that needs new patches, or one added by hand, takes these steps:
+
+1. Run `.github/scripts/Add-UmbracoRelease.ps1 -Releases <release>`. It adds the
+   release to `UmbracoReleases` in `Directory.Build.props` and, when the release is
+   the newest, sets `UmbracoMaximumVersion` and `UmbracoVersion` to it, so the next
+   package release is numbered after it, starting at `<release>.1`. It also updates
+   the supported range that the documents show between `umbraco-releases` comments,
+   and in `docs/NUGET.md`, which nuget.org shows without HTML.
 2. Run `pwsh tests/Test-UmbracoReleases.ps1 -Releases <release>`. The fast tests
    show which entries no longer match, and `PatchOriginTests` says whether Umbraco
    changed the code or only its minified output.
-3. For each entry that no longer matches, add an entry for the new release with
-   `From` set to it, and give the old entry a `Before` with the same release. When
-   the old entry already had a `Before`, as an Umbraco 17 entry does, the new entry
-   keeps it.
+3. Fix each entry that no longer matches:
+   - For an entry in the release's major version folder, such as
+     `Umbraco18Patches.cs`, set its `Before` to the new release, and add an entry with
+     `From` set to the new release and `Before` set to the next major version's first
+     release, such as `19.0.0`.
+   - An entry in the area files applies to every major version, so copy it into each
+     major version's folder, limited to that version, and remove it from the area file.
+     Then change the copy in the release's major version folder as above. Keep the
+     shared edits in the area file, and have the copies refer to them.
 4. Run the fast tests for the new release again, then the browser tests with
    `pwsh tests/Test-UmbracoReleases.ps1 -Releases <release> -Browser`. The earlier
    releases need no new run: the new entries start at the new release, and each
    `Before` leaves the earlier releases' entries as they were.
+
+### Add an Umbraco major version
+
+Umbraco 19 runs on .NET 11, and NuGet picks a package's assembly by the site's .NET
+version, so it needs a second build of the package:
+
+1. Install the .NET 11 SDK, and add it to the workflows' `setup-dotnet` steps.
+2. Target `net10.0;net11.0` in the package project, with each target's own range of
+   Umbraco packages: 17 and 18 for .NET 10, 19 for .NET 11. Make the test project
+   target .NET 11 when `UmbracoVersion` is a 19 release, and set the starter kit
+   version for 19 in `Directory.Build.props`.
+3. Add `src/Patchsets/Umbraco19/Umbraco19Patches.cs` and
+   `src/UmbracoVersions/Umbraco19/Umbraco19.cs`, compile those folders into the .NET 11
+   build only, and add `Umbraco19` to `UmbracoMajor.All` there, with
+   `#if NET11_0_OR_GREATER`. The .NET 11 build compiles against Umbraco 19, so
+   `Umbraco19` can use its API directly. An API that Umbraco 19 changed becomes a
+   member of `UmbracoMajor`, which each version's subclass implements.
+4. List the first 19 release in `UmbracoReleases` by hand, since the add script
+   refuses a new major version. Then follow [Add an Umbraco release](#add-an-umbraco-release)
+   from step 2, and update the documents that name the supported major versions.
 
 ## Build a package
 
@@ -255,8 +336,9 @@ deterministic.
 
 ## Publish a release
 
-The tests run locally, not in the workflow, and each Umbraco release is tested once:
-when it is added, and again only after a change that might affect it. A new or
+The Release workflow runs no tests. Each Umbraco release is tested once: when it is
+added, by the New Umbraco releases workflow or locally, and again only after a change
+that might affect it, locally. A new or
 changed entry in `src/Patchsets` affects the releases from its `From` up to its
 `Before`. A change to the package's other code, or a new `UmbracoMinimumVersion`,
 can affect them all. Before releasing, run both tiers for those releases with

@@ -68,24 +68,6 @@ internal static class SignInPatches
                 """,
         },
 
-        // In 17.5, 17.6 and 18.0 the login app calls the password-reset and invitation APIs through its own copy of the
-        // generated API client instead, created without a base URL, so the requests go to the site root. Each entry
-        // gives that copy the base URL the preamble above gives the shared client.
-        new()
-        {
-            Path = "/umbraco/login/login.js",
-            From = "17.5.0",
-            Before = "17.7.0",
-            Edits = OwnClientBaseUrl,
-        },
-        new()
-        {
-            Path = "/umbraco/login/login.js",
-            From = "18.0.0",
-            Before = "18.1.0",
-            Edits = OwnClientBaseUrl,
-        },
-
         // The backoffice's own sign-in view, shown after sign-out. It builds the addresses of its logos and background from
         // the server URL, which it reads from Umbraco's server context only after its first render, so that render
         // requests them from the site root. The edit starts the view with the site's URL, which the server context then
@@ -114,8 +96,11 @@ internal static class SignInPatches
         },
     ];
 
-    /// <summary>The edit that creates the login app's own API client with the site's base URL.</summary>
-    private static AssetEdit[] OwnClientBaseUrl =>
+    /// <summary>
+    /// The edit that creates the login app's own API client with the site's base URL. Umbraco 17.5, 17.6 and 18.0 call
+    /// the password-reset and invitation APIs through that client, so each major version's entries apply the edit there.
+    /// </summary>
+    internal static AssetEdit[] OwnClientBaseUrl =>
     [
         new()
         {

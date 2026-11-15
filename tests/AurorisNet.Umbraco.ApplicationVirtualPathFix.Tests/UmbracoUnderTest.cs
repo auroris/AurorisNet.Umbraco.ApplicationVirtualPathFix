@@ -22,4 +22,7 @@ internal static class UmbracoUnderTest
 
     /// <summary>The entries of the patch list that apply to <see cref="Release"/>, in list order.</summary>
     internal static AssetPatch[] Patches => AssetPatcher.For(Release);
+
+    /// <summary>What the package does differently for <see cref="Release"/>'s major version.</summary>
+    internal static UmbracoMajor Major => UmbracoMajor.For(Release);
 }

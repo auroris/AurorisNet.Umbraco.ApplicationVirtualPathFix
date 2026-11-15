@@ -103,7 +103,7 @@ public sealed class AssetFileProviderTests(AssetPatchTests.Assets assets) : ICla
         var provider = CreateProvider();
         app.Environment.WebRootFileProvider = provider;
         app.UsePathBase(Prefix);
-        app.UseUmbracoPathsUnderPathBase();
+        app.UseUmbracoPathsUnderPathBase(UmbracoUnderTest.Major);
         app.UseUmbracoBackOfficeRewrites();
         app.UseStaticFiles();
         await app.StartAsync(TestContext.Current.CancellationToken);

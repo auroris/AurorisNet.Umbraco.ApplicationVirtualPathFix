@@ -54,6 +54,38 @@ public sealed class SupportedReleasesTests
     }
 
     /// <summary>
+    /// Checks that the package defines what it does for the release under test's major version, as a release of a new
+    /// major version needs its own <see cref="UmbracoMajor"/>, and that <see cref="UmbracoMajor.All"/> lists each major
+    /// version once, oldest first.
+    /// </summary>
+    [Fact]
+    public void The_major_version_under_test_is_defined()
+    {
+        Assert.Equal(UmbracoUnderTest.Release.Major, UmbracoUnderTest.Major.Number);
+        var numbers = UmbracoMajor.All.Select(major => major.Number).ToArray();
+        Assert.Equal(numbers.Order().Distinct(), numbers);
+    }
+
+    /// <summary>
+    /// Checks that each major version's entries start at one of its releases and end by the next major version's first
+    /// release at the latest, so supporting another major version never changes them.
+    /// </summary>
+    [Fact]
+    public void Each_major_versions_entries_stay_within_it()
+    {
+        foreach (var major in UmbracoMajor.All)
+        {
+            foreach (var patch in major.Patches)
+            {
+                Assert.True(patch.From is { } from && Version.Parse(from).Major == major.Number,
+                    $"{patch} must start at an Umbraco {major.Number} release.");
+                Assert.True(patch.Before is { } before && Version.Parse(before) <= new Version(major.Number + 1, 0, 0),
+                    $"{patch} must end by Umbraco {major.Number + 1}.0.0.");
+            }
+        }
+    }
+
+    /// <summary>
     /// Checks that every type and member the package's compiled code refers to exists in the Umbraco release under test.
     /// The package compiles against the oldest supported release, so a member that a later release removed or changed,
     /// as Umbraco 18 gave the pipeline filter's full constructor two more parameters, would otherwise fail only when the
