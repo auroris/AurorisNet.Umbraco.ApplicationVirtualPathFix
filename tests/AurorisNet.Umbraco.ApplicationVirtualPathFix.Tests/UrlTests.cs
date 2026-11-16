@@ -9,7 +9,10 @@ using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
-/// <summary>Checks the media URL, import map and OAuth callback corrections without starting a site.</summary>
+/// <summary>
+/// Checks the media URL, import map and OAuth callback corrections, and the prefix that site code can read, without
+/// starting a site.
+/// </summary>
 public sealed class UrlTests
 {
     /// <summary>
@@ -164,6 +167,32 @@ public sealed class UrlTests
         Assert.Equal(login, settings.AuthorizeCallbackPathName);
         Assert.Equal(logout, settings.AuthorizeCallbackLogoutPathName);
         Assert.Equal(error, settings.AuthorizeCallbackErrorPathName);
+    }
+
+    /// <summary>
+    /// Checks that <see cref="VirtualPathHosting.Prefix(IConfiguration)"/> returns the configured path with one leading
+    /// slash and no trailing one, or <see langword="null"/> for a site at the root. The result must match the prefix the
+    /// package itself uses, which it takes from Umbraco's hosting environment.
+    /// </summary>
+    [Theory]
+    [InlineData("/portal", "/portal")]
+    [InlineData("portal", "/portal")]
+    [InlineData("/portal/", "/portal")]
+    [InlineData("portal/", "/portal")]
+    [InlineData("/a/b", "/a/b")]
+    [InlineData("/", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void Site_code_reads_the_same_prefix_as_the_package(string? setting, string? expected)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [VirtualPathHosting.SettingKey] = setting }).Build();
+
+        Assert.Equal("Umbraco:CMS:Hosting:ApplicationVirtualPath", VirtualPathHosting.SettingKey);
+        Assert.Equal(expected, VirtualPathHosting.Prefix(configuration));
+        // Umbraco's hosting environment reports the setting with a leading slash, and "/" when it is not set.
+        var reported = setting is null ? "/" : setting.StartsWith('/') ? setting : "/" + setting;
+        Assert.Equal(expected, VirtualPathHosting.Prefix(new TestHostingEnvironment(reported)));
     }
 
     /// <summary>A URL assembler that returns what <paramref name="assemble"/> builds.</summary>

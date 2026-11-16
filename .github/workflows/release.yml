@@ -2,6 +2,15 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Choose the versions, build and pack only, and keep the packages as an artifact
+        type: boolean
+        default: false
+      notes:
+        description: Notes for the GitHub release, in Markdown, shown above the generated list of changes
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -26,15 +35,17 @@ jobs:
       id-token: write
     env:
       PACKAGE_PROJECT: src/AurorisNet.Umbraco.ApplicationVirtualPathFix.csproj
+      # Makes the build deterministic and, with Directory.Build.props, turns its warnings into errors.
       ContinuousIntegrationBuild: 'true'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+      # global.json keeps the build on a .NET 10 SDK, whichever other SDKs the runner has.
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
 
@@ -63,8 +74,19 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Could not pack $version." }
           }
 
+      # A dry run ends here, with the packages a release of this commit would publish. Nothing is tagged or published.
+      - name: Keep the packages of a dry run
+        if: ${{ inputs.dry-run }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages-${{ github.run_id }}
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
+          retention-days: 7
+
       # Reserve every tag before publishing any package, so a retried run reuses all of them.
       - name: Reserve the release tags before publishing
+        if: ${{ !inputs.dry-run }}
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAGS: ${{ steps.version.outputs.tags }}
@@ -80,12 +102,14 @@ jobs:
           }
 
       - name: Log in to NuGet with trusted publishing
+        if: ${{ !inputs.dry-run }}
         id: nuget-login
-        uses: NuGet/login@ebc737b6fc418a6ca0073cf116ec8dc156d8b81e # v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
           user: AurorisNet
 
       - name: Publish to NuGet
+        if: ${{ !inputs.dry-run }}
         env:
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           RELEASE_VERSIONS: ${{ steps.version.outputs.versions }}
@@ -96,13 +120,16 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Could not publish $version to NuGet." }
           }
 
-      # The newest major version's release gets generated notes and stays the latest. Each other release points to it,
-      # since it publishes the same package under another version number.
+      # The newest major version's release gets the notes from the run and the generated list of changes. It becomes the
+      # latest release unless a newer one is published already, as when this run retries an older commit's release.
+      # Each other release points to it, since it publishes the same package under another version number.
       - name: Publish the GitHub releases
+        if: ${{ !inputs.dry-run }}
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSIONS: ${{ steps.version.outputs.versions }}
           RELEASE_TAGS: ${{ steps.version.outputs.tags }}
+          RELEASE_NOTES: ${{ inputs.notes }}
         run: |
           $versions = $env:RELEASE_VERSIONS.Split(',')
           $tags = $env:RELEASE_TAGS.Split(',')
@@ -112,7 +139,12 @@ jobs:
             if ($LASTEXITCODE -eq 0) {
               gh release upload "$($tags[$i])" "$package" --clobber
             } elseif ($i -eq 0) {
-              gh release create "$($tags[$i])" "$package" --verify-tag --title "$($versions[$i])" --generate-notes --latest
+              $latest = & .github/scripts/Test-LatestRelease.ps1 -Version $versions[$i]
+              $create = @('release', 'create', $tags[$i], $package, '--verify-tag', '--title', $versions[$i], '--generate-notes',
+                ($latest ? '--latest' : '--latest=false'))
+              # gh places these notes above the generated ones.
+              if ($env:RELEASE_NOTES) { $create += @('--notes', $env:RELEASE_NOTES) }
+              gh @create
             } else {
               $notes = "The same package as [$($versions[0])](https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$($tags[0])), " +
                 "numbered for sites on Umbraco $($versions[$i].Split('.')[0]), which can float on ``$($versions[$i].Split('.')[0]).*``."

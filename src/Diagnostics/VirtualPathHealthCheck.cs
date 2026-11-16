@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using Umbraco.Cms.Core.Configuration;
 using Umbraco.Cms.Core.HealthChecks;
 using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
@@ -28,7 +29,7 @@ internal sealed class VirtualPathHealthCheck(VirtualPathStatus status, IHostingE
     /// <summary>
     /// Produces the results in order: the Umbraco version, then at the root a note that only the session restore fix
     /// applies. Under a virtual path it continues with the request's path base, the patched files or each problem, and
-    /// the requests outside the virtual path.
+    /// the requests outside the virtual path. Each message is written as plain text, which <see cref="Status"/> encodes.
     /// </summary>
     private IEnumerable<HealthCheckStatus> Check()
     {
@@ -62,6 +63,15 @@ internal sealed class VirtualPathHealthCheck(VirtualPathStatus status, IHostingE
                 + $"{status.LastRequestOutside}. Route only {prefix} to the site, unless these are load balancer probes.");
     }
 
-    /// <summary>Creates a result of <paramref name="type"/> with <paramref name="message"/>.</summary>
-    private static HealthCheckStatus Status(StatusResultType type, string message) => new(message) { ResultType = type };
+    /// <summary>
+    /// Creates a result of <paramref name="type"/> from <paramref name="message"/>, which is plain text, and HTML-encodes
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// Umbraco renders a result's message as HTML, in the backoffice and in notification emails. A message can quote a
+    /// request: the path of a request outside the virtual path comes from whoever sent it, signed in or not. Encoding
+    /// every message here keeps such text from reaching the page as markup.
+    /// </remarks>
+    private static HealthCheckStatus Status(StatusResultType type, string message)
+        => new(HtmlEncoder.Default.Encode(message)) { ResultType = type };
 }

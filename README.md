@@ -56,8 +56,9 @@ Reference your site's Umbraco major version, so NuGet installs the newest packag
 <PackageReference Include="AurorisNet.Umbraco.ApplicationVirtualPathFix" Version="18.*" />
 ```
 
-On Umbraco 17, use `Version="17.*"`. Then set the site's application path in
-`appsettings.json`:
+On Umbraco 17, use `Version="17.*"`. A site with central package management needs
+`CentralPackageFloatingVersionsEnabled` for a floating version, or an exact version such
+as `18.3.1.2`. Then set the site's application path in `appsettings.json`:
 
 ```json
 {

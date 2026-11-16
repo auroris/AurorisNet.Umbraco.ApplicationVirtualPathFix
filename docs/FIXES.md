@@ -61,6 +61,13 @@ report it, and the startup log names each patch that no longer applies.
 - **Third-party plugins** build their own URLs. The package prefixes their import-map
   entries, and the plugins handle the rest.
 
+## The path in site code
+
+The package needs no code in the site. When the site's own startup code needs the path,
+`VirtualPathHosting.Prefix(builder.Configuration)` returns it with one leading slash,
+such as `/SomeTestPath`, or `null` for a site at the root.
+`VirtualPathHosting.SettingKey` names the setting it reads.
+
 ## Health check
 
 Settings → Health Check → Configuration → **Application virtual path** reports:
@@ -71,7 +78,9 @@ Settings → Health Check → Configuration → **Application virtual path** rep
 - requests that reached the site outside the virtual path.
 
 The startup log carries the same warnings. Umbraco's own security-header checks request
-the host root, so their results describe the host rather than the site.
+the host root, so their results describe the host rather than the site. Umbraco shows a
+check's messages as HTML, and the last one quotes the path of a request that needed no
+sign-in, so the check HTML-encodes every message.
 
 ## Testing
 

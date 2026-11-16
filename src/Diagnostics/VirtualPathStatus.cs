@@ -19,6 +19,10 @@ internal sealed class VirtualPathStatus
     public long RequestsOutside => Interlocked.Read(ref _requestsOutside);
 
     /// <summary>The path of the latest request outside the virtual path, or <see langword="null"/> before the first.</summary>
+    /// <remarks>
+    /// Whoever sent the request chose this text, and needed no sign-in to send it. Encode it for the place that shows it,
+    /// as <see cref="VirtualPathHealthCheck"/> does for HTML.
+    /// </remarks>
     public string? LastRequestOutside => Volatile.Read(ref _lastRequestOutside);
 
     /// <summary>Records that the patched copies are ready, with the number of files patched.</summary>

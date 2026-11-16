@@ -1,3 +1,4 @@
+using System.Net;
 using AurorisNet.Umbraco.ApplicationVirtualPathFix.Diagnostics;
 using Umbraco.Cms.Core.HealthChecks;
 
@@ -55,6 +56,36 @@ public sealed class HealthCheckTests
         Assert.Contains("login.js", results[2].Message, StringComparison.Ordinal);
         Assert.StartsWith("2 requests", results[3].Message, StringComparison.Ordinal);
         Assert.Contains("most recently /umbraco.", results[3].Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Checks that every message is HTML-encoded, because Umbraco renders health-check messages as HTML. A request
+    /// outside the virtual path chooses its own path, so markup in that path, in the request's path base, in the
+    /// configured prefix or in a recorded problem must reach the page as text. Decoded, each message reads as written.
+    /// </summary>
+    [Fact]
+    public async Task Messages_are_encoded_as_HTML_text()
+    {
+        const string markup = "<img src=x onerror=alert(1)>";
+        var status = new VirtualPathStatus();
+        status.AssetsPrepared(19);
+        status.Problem($"Umbraco's /umbraco/login/login.js no longer contains {markup}, so that part of the fix is not applied.");
+        status.RequestOutside("/" + markup);
+        var results = await CheckAsync("/a&b", "/" + markup, status, UmbracoUnderTest.Release);
+        Assert.Equal(4, results.Length);
+        Assert.All(results, result =>
+        {
+            Assert.DoesNotContain('<', result.Message);
+            Assert.DoesNotContain('>', result.Message);
+            // Every ampersand left in a message starts a character reference.
+            Assert.DoesNotMatch("&(?!#x[0-9A-F]+;|amp;|lt;|gt;|quot;)", result.Message);
+        });
+        var text = results.Select(result => WebUtility.HtmlDecode(result.Message)).ToArray();
+        // A path base is written as it appears in a URL, percent-encoded.
+        Assert.Contains($"configured for /a&b, but this request arrived with the path base \"{new PathString("/" + markup)}\".", text[1],
+            StringComparison.Ordinal);
+        Assert.Equal($"Umbraco's /umbraco/login/login.js no longer contains {markup}, so that part of the fix is not applied.", text[2]);
+        Assert.Contains($"outside /a&b since it started, most recently /{markup}. Route only /a&b to the site", text[3], StringComparison.Ordinal);
     }
 
     /// <summary>

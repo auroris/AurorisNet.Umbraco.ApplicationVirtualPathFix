@@ -10,7 +10,8 @@ project, the quick tests sit at the root and the browser tests in `Browser`.
 
 ## Requirements
 
-- The .NET 10 SDK and PowerShell 7.
+- The .NET 10 SDK and PowerShell 7. [`global.json`](../global.json) keeps every build on a
+  .NET 10 SDK, also on a machine that has a newer one.
 - On Windows, a short clone path. Playwright's package nests deeply, and the build fails
   with `MSB3021` when a path exceeds 260 characters unless long paths are enabled.
 
@@ -25,7 +26,9 @@ The tests build against the Umbraco release in `UmbracoVersion` in
 `-p:UmbracoVersion=17.5.3` to build against another supported release.
 
 Both projects generate XML documentation, so the compiler checks every doc comment. Keep
-the build free of warnings. Outside a Git checkout, add
+the build free of warnings: the Release workflow builds with
+`ContinuousIntegrationBuild`, which turns a warning into an error. NuGet's vulnerability
+reports stay warnings there. Outside a Git checkout, add
 `-p:SourceTimestamp=2026-11-14T12:00:00Z`, because the build reads the commit time from
 Git for the patched files' `Last-Modified` time.
 
@@ -123,6 +126,9 @@ of tests on them:
 
 - Releases that pass are listed on a branch named `umbraco-releases/<releases>`, with a
   pull request. Merge it, then [publish a release](VERSIONING.md#publish-a-release).
+  While the branch exists, later runs skip its releases, and GitHub deletes it when the
+  pull request merges. To test a release again after closing its pull request unmerged,
+  delete the branch.
 - A release that fails gets an issue titled `Umbraco <release> fails the tests`, which
   links the run. The run's artifacts hold the logs, traces and screenshots. Fix the
   patches as [Add a release by hand](#add-a-release-by-hand) describes. Closing the issue
@@ -136,6 +142,13 @@ permissions → Allow GitHub Actions to create and approve pull requests** is on
 then, it pushes the branch and opens an issue that links it. To test chosen releases, or
 to see the results without opening anything, run it from **Actions → New Umbraco
 releases → Run workflow** with its `releases` and `dry-run` inputs.
+
+The workflow keeps the tests apart from the reporting. Its test job builds and runs
+releases that NuGet has only just published, so that job can only read the repository
+and holds no token. A separate job reads the two summaries the tests wrote, then opens
+the pull request and the issues. GitHub disables a scheduled workflow after 60 days
+without activity in the repository, so each scheduled run also enables the workflow
+again, which restarts that count.
 
 ### Add a release by hand
 
@@ -169,7 +182,8 @@ releases → Run workflow** with its `releases` and `dry-run` inputs.
 Umbraco 19 runs on .NET 11, and NuGet picks a package's assembly by the site's .NET
 version, so Umbraco 19 needs a second build of the package:
 
-1. Install the .NET 11 SDK, and add it to the workflows' `setup-dotnet` steps.
+1. Install the .NET 11 SDK. Add it to the workflows' `setup-dotnet` steps, and raise the
+   SDK version in `global.json` to match.
 2. Target `net10.0;net11.0` in the package project, with Umbraco 17 and 18 for .NET 10
    and Umbraco 19 for .NET 11. Make the test project target .NET 11 when `UmbracoVersion`
    is a 19 release, and add the Umbraco 19 starter kit to `Directory.Build.props`.
@@ -182,7 +196,7 @@ version, so Umbraco 19 needs a second build of the package:
    accepts only the major versions already listed. Add it to the supported releases in
    `docs/NUGET.md`, and add a row to the README's supported-versions table with an
    `<!-- umbraco-releases 19 -->` marker. Update the other text that names the supported
-   major versions.
+   major versions, including the repository's description on GitHub.
 5. Continue from step 2 of [Add a release by hand](#add-a-release-by-hand).
 
 ## Workflow scripts
@@ -197,6 +211,11 @@ Invoke-Pester .github/scripts -CI
 
 The tests work in disposable folders and Git repositories, so this repository and
 GitHub stay untouched.
+
+The workflows pin each action to a commit, with its version in a comment beside it.
+Dependabot opens a pull request when an action publishes a newer release. Pin the hash
+of a commit: a version tag can have a hash of its own, which stops resolving once the
+tag moves to a later release.
 
 ## Documents
 

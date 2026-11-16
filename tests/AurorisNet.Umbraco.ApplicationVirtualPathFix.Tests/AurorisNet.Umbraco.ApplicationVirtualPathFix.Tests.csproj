@@ -25,7 +25,8 @@
   <ItemGroup>
     <!--
       The views a new Umbraco 18.3.1 site starts with, from src/Umbraco.Web.UI/Views in the Umbraco repository
-      (MIT licensed). The build copies them to the output instead of compiling them, and each test site gets a copy.
+      (MIT licensed; Browser/SiteTemplate-LICENSE.txt carries Umbraco's notice). The build copies them to the output
+      instead of compiling them, and each test site gets a copy.
     -->
     <Content Remove="Browser/SiteTemplate/**" />
     <None Include="Browser/SiteTemplate/**" CopyToOutputDirectory="PreserveNewest" />

@@ -18,4 +18,11 @@
          gives IntelliSense for its public API. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
+  <!-- The Release workflow sets ContinuousIntegrationBuild, so a warning stops a release instead of shipping in it.
+       Vulnerability reports stay warnings: the package compiles against the oldest supported Umbraco release, and an
+       advisory against that release, or an audit source that does not answer, must not block publishing. -->
+  <PropertyGroup Condition="'$(ContinuousIntegrationBuild)' == 'true'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904;NU1905</WarningsNotAsErrors>
+  </PropertyGroup>
 </Project>

@@ -37,15 +37,26 @@ a release. The workflow runs no tests, because each Umbraco release was tested w
 was added, as [Developing](DEVELOPING.md) describes. It:
 
 1. chooses each version's count from the release tags;
-2. builds and packs each version;
+2. builds and packs each version, and stops on any build warning;
 3. reserves a tag for each, such as `v18.3.1.2` and `v17.8.1.1`, before publishing any;
 4. publishes each package to NuGet and creates a GitHub release for each. The Umbraco 18
    release is marked as the latest.
 
+The workflow has two inputs:
+
+- **dry-run** stops after step 2 and keeps the packages as an artifact of the run, named
+  `packages-<run>`. Nothing is tagged or published, so use it to see what a release of
+  `main` would publish, or to try a change to the workflow.
+- **notes** is Markdown for the GitHub release. The workflow places it above GitHub's
+  generated list of changes, which names merged pull requests only. Describe changes
+  that were committed to `main` directly, and anything a site must do when it updates.
+
 Running Release again for a tagged commit reuses its tags, so a partial publication can
-finish. A new count goes only to the tip of `main`. Keep every release tag, including
-`v18.3.1.1`, whose package is deprecated: NuGet keeps every version it has published, so
-the workflow must count past it.
+finish. A new count goes only to the tip of `main`. When a newer release is published
+already, the retried one leaves it marked as the latest. Keep every release tag,
+including `v18.3.1.1`, whose package is deprecated: NuGet keeps every version it has
+published, so the workflow must count past it. A tag rule on GitHub keeps `v*` tags from
+being moved or deleted.
 
 NuGet trusted publishing is configured for the `AurorisNet` account, the repository
 `auroris/UmbracoApplicationVirtualPathFix`, the workflow `release.yml` and no

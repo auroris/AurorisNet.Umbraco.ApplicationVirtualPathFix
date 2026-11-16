@@ -12,6 +12,9 @@
     <PackageTags>umbraco;umbraco-marketplace;virtual-path;backoffice</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <!-- The notes of a release are on its GitHub release, which the Release workflow creates under this tag. -->
+    <PackageReleaseNotes>https://github.com/auroris/UmbracoApplicationVirtualPathFix/releases/tag/v$(Version)</PackageReleaseNotes>
     <PackageProjectUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</PackageProjectUrl>
     <RepositoryUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -53,6 +56,7 @@
     <Using Include="Umbraco.Extensions" />
     <!-- nuget.org renders Markdown without HTML or relative links, so the package has its own README. -->
     <None Include="../docs/NUGET.md" Pack="true" PackagePath="README.md" />
+    <None Include="../docs/images/icon.png" Pack="true" PackagePath="/" />
     <None Include="../LICENSE" Pack="true" PackagePath="/" />
     <Content Update="appsettings-schema*.json;umbraco-package-schema.json" Pack="false" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
   </ItemGroup>
