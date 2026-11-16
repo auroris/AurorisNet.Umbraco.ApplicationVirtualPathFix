@@ -1,3 +1,5 @@
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Composition;
+
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 
 /// <summary>Checks that the package's decorators forward every member of the Umbraco interfaces they implement.</summary>

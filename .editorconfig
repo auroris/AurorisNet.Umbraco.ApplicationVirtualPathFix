@@ -1,0 +1,30 @@
+# The repository's formatting and C# conventions. Git sets line endings, as .gitattributes describes.
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{csproj,props,targets,slnx,xml,json,yml,yaml}]
+indent_size = 2
+
+# Umbraco's views and jQuery keep their original bytes.
+[tests/**/Browser/{Fixtures,SiteTemplate}/**]
+charset = unset
+indent_style = unset
+indent_size = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+[*.cs]
+max_line_length = 120
+# Each folder is a namespace under its project's root namespace, declared once per file.
+csharp_style_namespace_declarations = file_scoped
+dotnet_style_namespace_match_folder = true
+dotnet_diagnostic.IDE0130.severity = suggestion
+# System namespaces first, then the others in alphabetical order.
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false

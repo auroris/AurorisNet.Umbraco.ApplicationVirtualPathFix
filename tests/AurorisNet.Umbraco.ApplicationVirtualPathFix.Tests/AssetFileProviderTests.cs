@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.FileProviders;

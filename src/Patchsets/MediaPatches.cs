@@ -1,4 +1,6 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 
 /// <summary>The previews of media in the image cropper and the upload field.</summary>
 internal static class MediaPatches

@@ -1,4 +1,6 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 
 /// <summary>Files Umbraco serves on the website rather than in the backoffice.</summary>
 internal static class WebsitePatches

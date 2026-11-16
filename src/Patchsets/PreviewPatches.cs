@@ -1,4 +1,6 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 
 /// <summary>The backoffice's preview window.</summary>
 internal static class PreviewPatches

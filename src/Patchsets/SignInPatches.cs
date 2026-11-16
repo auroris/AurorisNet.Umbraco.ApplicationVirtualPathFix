@@ -1,4 +1,6 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 
 /// <summary>The sign-in page's script and the backoffice's sign-in view.</summary>
 internal static class SignInPatches

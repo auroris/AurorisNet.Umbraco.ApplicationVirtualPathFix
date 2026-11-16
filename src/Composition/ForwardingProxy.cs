@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Composition;
 
 /// <summary>
 /// Implements <typeparamref name="TService"/> by passing every call to the service it wraps, except calls to the

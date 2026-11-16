@@ -1,2 +1,4 @@
+# Store text files with LF line endings, whatever each contributor's Git settings.
+* text=auto
 # Keep the original bytes of vendored assets, which browsers check against integrity hashes.
-tests/**/BrowserFixtures/** -text
+tests/**/Browser/Fixtures/** -text

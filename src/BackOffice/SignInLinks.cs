@@ -1,10 +1,11 @@
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Composition;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Models.Membership;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services.OperationStatus;
 using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.BackOffice;
 
 /// <summary>Adds the virtual path to the invitation and password-reset links that Umbraco emails to users.</summary>
 /// <remarks>

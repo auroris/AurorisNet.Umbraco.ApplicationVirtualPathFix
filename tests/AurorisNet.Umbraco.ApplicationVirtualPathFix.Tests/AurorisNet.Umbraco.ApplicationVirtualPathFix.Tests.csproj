@@ -1,14 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <IsTestProject>true</IsTestProject>
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
     <IsPackable>false</IsPackable>
     <CompressionEnabled>false</CompressionEnabled>
-    <!-- Generate the XML documentation, so the compiler checks the doc comments as it does for the package. -->
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
@@ -31,9 +27,9 @@
       The views a new Umbraco 18.3.1 site starts with, from src/Umbraco.Web.UI/Views in the Umbraco repository
       (MIT licensed). The build copies them to the output instead of compiling them, and each test site gets a copy.
     -->
-    <Content Remove="SiteTemplate/**" />
-    <None Include="SiteTemplate/**" CopyToOutputDirectory="PreserveNewest" />
-    <Content Remove="BrowserFixtures/**" />
-    <None Include="BrowserFixtures/**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Remove="Browser/SiteTemplate/**" />
+    <None Include="Browser/SiteTemplate/**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Remove="Browser/Fixtures/**" />
+    <None Include="Browser/Fixtures/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

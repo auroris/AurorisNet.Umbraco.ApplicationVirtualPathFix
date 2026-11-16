@@ -3,7 +3,7 @@ using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
 using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Media;
 
 /// <summary>
 /// Corrects media URLs that Umbraco's URL assembler prefixes twice, such as signed thumbnail URLs, so each keeps a single

@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Web.Common.Hosting;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.BackOffice;
 
 /// <summary>
 /// Adds the package's attributes to the backoffice page's <c>umb-app</c> element and corrects the basic-auth form

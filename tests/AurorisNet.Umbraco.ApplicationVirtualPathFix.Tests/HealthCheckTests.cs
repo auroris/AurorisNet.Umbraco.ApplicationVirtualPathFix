@@ -1,3 +1,4 @@
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Diagnostics;
 using Umbraco.Cms.Core.HealthChecks;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;

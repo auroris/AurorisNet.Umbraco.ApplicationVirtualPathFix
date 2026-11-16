@@ -1,4 +1,8 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets.Umbraco17;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets.Umbraco18;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 
 /// <summary>
 /// The edits for the rich text editor's stylesheets. Umbraco 17 and 18 share each shape of the code they change, so the

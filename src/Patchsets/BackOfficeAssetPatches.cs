@@ -1,4 +1,7 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 
 /// <summary>
 /// Every change the package makes to the JavaScript and CSS files that Umbraco serves. Each change keeps a URL inside the

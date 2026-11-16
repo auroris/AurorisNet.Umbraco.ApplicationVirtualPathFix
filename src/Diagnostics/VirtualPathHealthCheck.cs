@@ -2,7 +2,7 @@ using Umbraco.Cms.Core.Configuration;
 using Umbraco.Cms.Core.HealthChecks;
 using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Diagnostics;
 
 /// <summary>
 /// Reports the fix's status under Settings → Health Check: whether the package supports the Umbraco version, whether

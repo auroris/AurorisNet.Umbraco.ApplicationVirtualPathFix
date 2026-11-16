@@ -1,4 +1,6 @@
 using System.Reflection;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions;
 using Umbraco.Cms.Core.Configuration;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;

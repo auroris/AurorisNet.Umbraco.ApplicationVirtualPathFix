@@ -1,6 +1,6 @@
 name: New Umbraco releases
 
-# Looks for new releases of the Umbraco major versions the package supports each day, and runs the fast tests and the
+# Looks for new releases of the Umbraco major versions the package supports each day, and runs the quick tests and the
 # browser cases on them. A release that passes gets a pull request that adds it to UmbracoReleases; one that fails gets
 # an issue. Publishing a package that lists a new release stays a manual run of the Release workflow.
 on:
@@ -106,10 +106,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pwsh tests/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
 
-      - name: Run the fast tests
+      - name: Run the quick tests
         if: ${{ !cancelled() && steps.add.outcome == 'success' }}
         continue-on-error: true
-        run: pwsh tests/Test-UmbracoReleases.ps1 -Releases $env:RELEASES -SummaryPath artifacts/fast.json
+        run: pwsh tests/Test-UmbracoReleases.ps1 -Releases $env:RELEASES -SummaryPath artifacts/quick.json
 
       - name: Run the browser cases
         if: ${{ !cancelled() && steps.chromium.outcome == 'success' }}
@@ -135,5 +135,5 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
-          .github/scripts/Submit-UmbracoReleaseResults.ps1 -Releases $env:RELEASES -Summaries artifacts/fast.json, artifacts/browser.json `
+          .github/scripts/Submit-UmbracoReleaseResults.ps1 -Releases $env:RELEASES -Summaries artifacts/quick.json, artifacts/browser.json `
             -RunUrl $env:RUN_URL -DryRun:($env:DRY_RUN -eq 'true')

@@ -8,7 +8,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using static Microsoft.Playwright.Assertions;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests.Browser;
 
 /// <summary>
 /// Drives new Umbraco sites with the starter kit through Chromium, one hosting case per test. Browser console errors,
@@ -847,7 +847,7 @@ public sealed partial class SiteEndToEndTests(ITestOutputHelper output)
                         await route.FulfillAsync(new()
                         {
                             ContentType = "application/javascript",
-                            Path = Path.Combine(AppContext.BaseDirectory, "BrowserFixtures", "jquery-3.6.0.min.js"),
+                            Path = Path.Combine(AppContext.BaseDirectory, "Browser", "Fixtures", "jquery-3.6.0.min.js"),
                             Headers = new Dictionary<string, string> { ["Access-Control-Allow-Origin"] = "*" },
                         });
                     else if (url.Host == "fonts.googleapis.com")

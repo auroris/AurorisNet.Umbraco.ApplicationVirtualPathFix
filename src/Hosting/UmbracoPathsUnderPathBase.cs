@@ -1,6 +1,7 @@
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions;
 using Umbraco.Cms.Web.Common.Hosting;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Hosting;
 
 /// <summary>
 /// Puts the virtual path back onto <c>Request.Path</c> for the Umbraco features that compare it with a path that

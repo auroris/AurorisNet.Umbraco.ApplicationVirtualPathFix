@@ -4,11 +4,11 @@ BeforeAll {
 
 Describe 'Reporting the results of new Umbraco releases' {
     It 'passes a release only when every summary passed it, and exits with 1 when one failed' {
-        $fast = Join-Path $TestDrive 'fast.json'
+        $quick = Join-Path $TestDrive 'quick.json'
         $browser = Join-Path $TestDrive 'browser.json'
-        Set-Content -LiteralPath $fast '[{"Release":"18.3.2","Result":"passed","Tests":"total: 150","Failures":[]},{"Release":"17.8.2","Result":"passed","Tests":"total: 148","Failures":[]}]'
+        Set-Content -LiteralPath $quick '[{"Release":"18.3.2","Result":"passed","Tests":"total: 150","Failures":[]},{"Release":"17.8.2","Result":"passed","Tests":"total: 148","Failures":[]}]'
         Set-Content -LiteralPath $browser '[{"Release":"18.3.2","Result":"passed","Tests":"passed: full","Failures":[]},{"Release":"17.8.2","Result":"failed","Tests":"failed: full","Failures":["full: Patched_features_work_under_a_nested_https_path"]}]'
-        $output = pwsh -NoProfile -File $script -Releases '18.3.2,17.8.2' -Summaries "$fast,$browser" -DryRun
+        $output = pwsh -NoProfile -File $script -Releases '18.3.2,17.8.2' -Summaries "$quick,$browser" -DryRun
         $LASTEXITCODE | Should -Be 1
         $output | Should -Contain 'Passed: 18.3.2'
         $output | Should -Contain 'Failed: 17.8.2'
@@ -17,18 +17,18 @@ Describe 'Reporting the results of new Umbraco releases' {
     }
 
     It 'fails every release when a summary is missing, as when its tests never ran' {
-        $fast = Join-Path $TestDrive 'fast-only.json'
-        Set-Content -LiteralPath $fast '[{"Release":"18.3.2","Result":"passed","Tests":"total: 150","Failures":[]}]'
-        $output = pwsh -NoProfile -File $script -Releases '18.3.2' -Summaries "$fast,$(Join-Path $TestDrive 'browser-missing.json')" -DryRun
+        $quick = Join-Path $TestDrive 'quick-only.json'
+        Set-Content -LiteralPath $quick '[{"Release":"18.3.2","Result":"passed","Tests":"total: 150","Failures":[]}]'
+        $output = pwsh -NoProfile -File $script -Releases '18.3.2' -Summaries "$quick,$(Join-Path $TestDrive 'browser-missing.json')" -DryRun
         $LASTEXITCODE | Should -Be 1
         $output | Should -Contain 'Failed: 18.3.2'
         ($output -join "`n") | Should -BeLike '*The browser-missing tests did not run.*'
     }
 
     It 'exits with 0 when every release passed' {
-        $fast = Join-Path $TestDrive 'all-fast.json'
-        Set-Content -LiteralPath $fast '[{"Release":"18.3.2","Result":"passed","Tests":"total: 150","Failures":[]}]'
-        $output = pwsh -NoProfile -File $script -Releases '18.3.2' -Summaries $fast -DryRun
+        $quick = Join-Path $TestDrive 'all-quick.json'
+        Set-Content -LiteralPath $quick '[{"Release":"18.3.2","Result":"passed","Tests":"total: 150","Failures":[]}]'
+        $output = pwsh -NoProfile -File $script -Releases '18.3.2' -Summaries $quick -DryRun
         $LASTEXITCODE | Should -Be 0
         $output | Should -Contain 'Passed: 18.3.2'
     }

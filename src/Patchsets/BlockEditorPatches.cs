@@ -1,4 +1,6 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 
 /// <summary>The block grid's layout stylesheets and the thumbnails of block types.</summary>
 internal static class BlockEditorPatches

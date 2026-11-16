@@ -1,7 +1,10 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets.Umbraco18;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions.Umbraco18;
 
 /// <summary>What the package does differently for Umbraco 18.</summary>
-internal sealed class Umbraco18 : UmbracoMajor
+internal sealed class Umbraco18Major : UmbracoMajor
 {
     /// <summary>18.</summary>
     internal override int Number => 18;

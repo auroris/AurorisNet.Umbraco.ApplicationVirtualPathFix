@@ -10,5 +10,12 @@
     <!-- The starter kit the browser tests install, which follows the major version of the release under test. -->
     <UmbracoStarterKitVersion Condition="$(UmbracoVersion.StartsWith('17.'))">17.0.0</UmbracoStarterKitVersion>
     <UmbracoStarterKitVersion Condition="'$(UmbracoStarterKitVersion)' == ''">18.0.0</UmbracoStarterKitVersion>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Generate the XML documentation, so the compiler checks every doc comment: malformed XML, references that do not
+         resolve, mismatched parameter names and undocumented public members. The package includes the file, which
+         gives IntelliSense for its public API. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 </Project>

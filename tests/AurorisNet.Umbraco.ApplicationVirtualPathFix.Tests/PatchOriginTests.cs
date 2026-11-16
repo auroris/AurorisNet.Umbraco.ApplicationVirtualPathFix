@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
 using Microsoft.Extensions.FileProviders;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;

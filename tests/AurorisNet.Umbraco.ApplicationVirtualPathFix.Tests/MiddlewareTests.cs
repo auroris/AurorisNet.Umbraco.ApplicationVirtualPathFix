@@ -1,5 +1,9 @@
 using System.IO.Compression;
 using System.Net;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.BackOffice;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Hosting;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Razor.TagHelpers;

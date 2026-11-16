@@ -1,12 +1,14 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Diagnostics;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Umbraco.Cms.Web.Common.Hosting;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
 
 /// <summary>
 /// Serves patched copies of Umbraco's backoffice files from the web root. The copies are prepared once, before Umbraco's

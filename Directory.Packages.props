@@ -2,9 +2,21 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
+  <!--
+    The package's dependencies span the supported Umbraco releases, from UmbracoMinimumVersion to UmbracoMaximumVersion
+    in Directory.Build.props. NuGet compiles the package against the oldest, which keeps it to APIs every supported
+    release has, and a site restores its own release. NuGet accepts any release within the range, so startup also checks
+    the site's release against UmbracoReleases. Umbraco.Cms.StaticAssets carries the backoffice scripts the package
+    patches, so widen the range only after a release's tests pass.
+  -->
+  <ItemGroup>
+    <PackageVersion Include="Umbraco.Cms.StaticAssets" Version="[$(UmbracoMinimumVersion), $(UmbracoMaximumVersion)]" />
+    <PackageVersion Include="Umbraco.Cms.Web.Common" Version="[$(UmbracoMinimumVersion), $(UmbracoMaximumVersion)]" />
+  </ItemGroup>
+  <!-- The tests' dependencies. The test sites run the Umbraco release in UmbracoVersion. -->
   <ItemGroup>
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
-    <!-- Acornima parses the patched scripts, so a broken replacement fails the fast tests before any browser starts. -->
+    <!-- Acornima parses the patched scripts, so a broken replacement fails the quick tests before any browser starts. -->
     <PackageVersion Include="Acornima" Version="1.9.2" />
     <!-- The browser tests save a memory dump of their own process, which hosts the site, when a step fails. -->
     <PackageVersion Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.750501" />

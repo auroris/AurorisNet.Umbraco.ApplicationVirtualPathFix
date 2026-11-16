@@ -1,6 +1,6 @@
-using System.Reflection;
 using System.Net;
 using System.Net.Security;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
@@ -13,10 +13,10 @@ using Umbraco.Cms.Api.Management.Services.NewsDashboard;
 using Umbraco.Cms.Api.Management.ViewModels.NewsDashboard;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Services;
-using PublishBranchFilter = Umbraco.Cms.Core.Models.PublishBranchFilter;
 using Umbraco.Cms.Core.Sync;
+using PublishBranchFilter = Umbraco.Cms.Core.Models.PublishBranchFilter;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests.Browser;
 
 /// <summary>How requests reach a test site.</summary>
 public enum TestHost
@@ -142,7 +142,7 @@ internal sealed class TestSite : IAsyncDisposable
         Directory.CreateDirectory(Path.Combine(root, "wwwroot"));
         Directory.CreateDirectory(Path.Combine(root, "mail"));
         // A new Umbraco site starts with view imports and block partials, which the starter kit relies on.
-        var template = Path.Combine(AppContext.BaseDirectory, "SiteTemplate");
+        var template = Path.Combine(AppContext.BaseDirectory, "Browser", "SiteTemplate");
         foreach (var file in Directory.EnumerateFiles(template, "*", SearchOption.AllDirectories))
         {
             var target = Path.Combine(root, Path.GetRelativePath(template, file));

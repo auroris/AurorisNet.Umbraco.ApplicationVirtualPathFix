@@ -2,6 +2,9 @@ using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 

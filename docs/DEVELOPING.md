@@ -4,6 +4,10 @@ This page covers building the package, running its tests and adding Umbraco rele
 The source comments explain how the code works: `src/Patchsets/BackOfficeAssetPatches.cs`
 explains the patch entries, and each test class says what it checks.
 
+Each folder under `src` holds one part of the package, in a namespace named after the
+folder. The root holds the public API: the composer and `VirtualPathHosting`. In the test
+project, the quick tests sit at the root and the browser tests in `Browser`.
+
 ## Requirements
 
 - The .NET 10 SDK and PowerShell 7.
@@ -31,9 +35,9 @@ To build a package:
 dotnet pack src -c Release -o artifacts/packages
 ```
 
-A local package is numbered `<UmbracoMaximumVersion>.0`, such as `18.3.1.0`. Published
-versions count from 1, so NuGet's cache keeps local and published packages apart.
-[Version numbering and releases](VERSIONING.md) covers publishing.
+A local package is numbered `<UmbracoMaximumVersion>.0`, which NuGet writes as `18.3.1`.
+Published versions count from 1, so NuGet's cache keeps local and published packages
+apart. [Version numbering and releases](VERSIONING.md) covers publishing.
 
 ## Quick tests
 
@@ -170,8 +174,8 @@ version, so Umbraco 19 needs a second build of the package:
    and Umbraco 19 for .NET 11. Make the test project target .NET 11 when `UmbracoVersion`
    is a 19 release, and add the Umbraco 19 starter kit to `Directory.Build.props`.
 3. Add `src/Patchsets/Umbraco19/Umbraco19Patches.cs` and
-   `src/UmbracoVersions/Umbraco19/Umbraco19.cs`, compiled into the .NET 11 build only.
-   Add `Umbraco19` to `UmbracoMajor.All` under `#if NET11_0_OR_GREATER`. When Umbraco 19
+   `src/UmbracoVersions/Umbraco19/Umbraco19Major.cs`, compiled into the .NET 11 build only.
+   Add `Umbraco19Major` to `UmbracoMajor.All` under `#if NET11_0_OR_GREATER`. When Umbraco 19
    changes an API the package uses, add a member to `UmbracoMajor` and implement it in
    each version's class.
 4. List the first 19 release in `UmbracoReleases` by hand, because the add script

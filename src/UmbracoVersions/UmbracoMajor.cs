@@ -1,4 +1,8 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions.Umbraco17;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions.Umbraco18;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions;
 
 /// <summary>
 /// What the package does differently for one Umbraco major version: the backoffice patches that only its releases
@@ -21,7 +25,7 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
 internal abstract class UmbracoMajor
 {
     /// <summary>The supported major versions, oldest first.</summary>
-    internal static readonly UmbracoMajor[] All = [new Umbraco17(), new Umbraco18()];
+    internal static readonly UmbracoMajor[] All = [new Umbraco17Major(), new Umbraco18Major()];
 
     /// <summary>The major version number, such as 18.</summary>
     internal abstract int Number { get; }

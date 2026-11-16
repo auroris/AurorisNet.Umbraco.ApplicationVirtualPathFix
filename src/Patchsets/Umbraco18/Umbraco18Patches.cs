@@ -1,4 +1,7 @@
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets.Umbraco17;
+
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets.Umbraco18;
 
 /// <summary>
 /// The entries for Umbraco 18 releases only. <see cref="BackOfficeAssetPatches"/> explains how to read an entry.

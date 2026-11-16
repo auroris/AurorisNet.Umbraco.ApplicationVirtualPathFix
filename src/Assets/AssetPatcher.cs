@@ -1,9 +1,10 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 using Microsoft.Extensions.FileProviders;
 using Umbraco.Cms.Core.Semver;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
 
 /// <summary>Finds the files that <see cref="BackOfficeAssetPatches.Patches"/> lists and applies their changes.</summary>
 internal static partial class AssetPatcher

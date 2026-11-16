@@ -1,10 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <StaticWebAssetBasePath>/</StaticWebAssetBasePath>
-    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <PackageId>AurorisNet.Umbraco.ApplicationVirtualPathFix</PackageId>
     <Title>Umbraco Application Virtual Path Fix</Title>
     <!-- The first three numbers are the newest supported Umbraco release, and the release workflow supplies the release
@@ -22,10 +19,6 @@
          GitHub, so a site's debugger can step into the package. -->
     <DebugType>embedded</DebugType>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
-    <!-- Generate the XML documentation, so the compiler checks every doc comment: malformed XML, references that do not
-         resolve, mismatched parameter names and undocumented public members. The package includes the file, which
-         gives IntelliSense for the public API. -->
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- The package compiles against the oldest supported Umbraco release, whose own dependencies can carry advisories
          that later releases fixed. A site restores the dependencies of its own Umbraco release, so audit only the
          packages this project references. The test project audits the whole graph of the release it runs. -->
@@ -36,13 +29,11 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <!--
       Reference the Umbraco packages the package uses rather than the Umbraco.Cms meta-package, so sites that
-      assemble Umbraco from individual packages (for example with ImageSharp2) can install it. The range spans the
-      tested releases but can admit untested releases between them; startup checks the exact list. NuGet compiles against
-      the oldest release in the range, which keeps it to APIs every supported release has. Umbraco.Cms.StaticAssets
-      carries the backoffice scripts the package patches, so add a release to the range only after its tests pass.
+      assemble Umbraco from individual packages (for example with ImageSharp2) can install it. Directory.Packages.props
+      sets their range, which spans the supported releases.
     -->
-    <PackageReference Include="Umbraco.Cms.Web.Common" Version="[$(UmbracoMinimumVersion), $(UmbracoMaximumVersion)]" />
-    <PackageReference Include="Umbraco.Cms.StaticAssets" Version="[$(UmbracoMinimumVersion), $(UmbracoMaximumVersion)]" />
+    <PackageReference Include="Umbraco.Cms.Web.Common" />
+    <PackageReference Include="Umbraco.Cms.StaticAssets" />
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>UmbracoMinimumVersion</_Parameter1>
       <_Parameter2>$(UmbracoMinimumVersion)</_Parameter2>

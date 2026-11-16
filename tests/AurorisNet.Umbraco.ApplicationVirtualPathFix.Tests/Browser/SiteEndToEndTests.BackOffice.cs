@@ -2,14 +2,16 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Diagnostics;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Playwright;
-using Umbraco.Cms.Web.Common.Hosting;
 using Umbraco.Cms.Core.HealthChecks;
 using Umbraco.Cms.Core.Services;
+using Umbraco.Cms.Web.Common.Hosting;
 using static Microsoft.Playwright.Assertions;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests.Browser;
 
 public sealed partial class SiteEndToEndTests
 {

@@ -6,7 +6,7 @@ using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Core.IO;
 using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Media;
 
 /// <summary>
 /// Serves media from Umbraco's media file system at the path requests carry under a path base.

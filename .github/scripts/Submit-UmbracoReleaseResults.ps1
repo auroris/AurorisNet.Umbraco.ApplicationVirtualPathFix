@@ -17,7 +17,7 @@ prints what it would report and changes nothing. Exits with 1 when any release f
 The releases that were tested. A value can list several, separated by commas.
 
 .PARAMETER Summaries
-The JSON summaries to read, such as the fast tests' and the browser tests'.
+The JSON summaries to read, such as the quick tests' and the browser tests'.
 
 .PARAMETER RunUrl
 The address of the workflow run, whose artifacts hold the logs.
@@ -124,7 +124,7 @@ Returns the text of the pull request that adds <releases>.
 function Format-PullRequest([string[]] $releases) {
     $one = $releases.Count -eq 1
     @(
-        "The fast tests and every browser case passed on Umbraco $($releases -join ', '), so this adds $($one ? 'it' : 'them') to"
+        "The quick tests and every browser case passed on Umbraco $($releases -join ', '), so this adds $($one ? 'it' : 'them') to"
         "``UmbracoReleases``."
         ''
         Format-Results $releases
@@ -152,7 +152,7 @@ elseif ($passed) {
             Invoke-Checked git @('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
             Invoke-Checked git @('switch', '-c', $branch)
             Invoke-Checked git @('add', '--', 'Directory.Build.props', 'README.md', 'docs')
-            Invoke-Checked git @('commit', '-m', "Add Umbraco $names", '-m', "The fast tests and every browser case passed on $names.")
+            Invoke-Checked git @('commit', '-m', "Add Umbraco $names", '-m', "The quick tests and every browser case passed on $names.")
             Invoke-Checked git @('push', 'origin', $branch)
             $file = New-TemporaryFile
             Set-Content -LiteralPath $file -Value $body -Encoding utf8

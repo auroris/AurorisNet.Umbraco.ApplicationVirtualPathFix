@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Diagnostics;
 
 /// <summary>Records what the fix did at startup and what it has seen since, for the health check to report.</summary>
 internal sealed class VirtualPathStatus

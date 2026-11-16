@@ -1,3 +1,5 @@
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.BackOffice;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Media;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Core.Manifest;

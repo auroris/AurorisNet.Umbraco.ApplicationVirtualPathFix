@@ -1,7 +1,7 @@
 using Umbraco.Cms.Core.Manifest;
 using Umbraco.Cms.Web.Common.Hosting;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.BackOffice;
 
 /// <summary>
 /// Adds the virtual path to the root-absolute entries of the backoffice import map and maps

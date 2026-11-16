@@ -4,7 +4,7 @@ using Umbraco.Cms.Core.Configuration;
 using Umbraco.Cms.Web.Common.Hosting;
 using IHostingEnvironment = Umbraco.Cms.Core.Hosting.IHostingEnvironment;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.BackOffice;
 
 /// <summary>
 /// Generates Umbraco's backoffice paths with a cache-bust hash that changes with both Umbraco and this package, so

@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 
-namespace AurorisNet.Umbraco.ApplicationVirtualPathFix;
+namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
 
 /// <summary>An Umbraco file the package corrects, and the changes it makes to that file.</summary>
 /// <remarks><see cref="BackOfficeAssetPatches"/> explains how to read an entry.</remarks>

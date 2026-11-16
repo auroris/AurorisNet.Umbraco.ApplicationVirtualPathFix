@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 using Acornima;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Patchsets;
 using Microsoft.Extensions.FileProviders;
 
 namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;

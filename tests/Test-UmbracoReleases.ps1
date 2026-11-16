@@ -7,7 +7,7 @@ Builds the package and runs its tests against each supported Umbraco release.
 Reads the supported releases from UmbracoReleases in Directory.Build.props, unless -Releases names others. Builds the
 test project once for each release, one at a time, into <ArtifactsPath>/<release>, then runs the tests for every
 release at the same time. Builds run one at a time because Umbraco's build targets write appsettings-schema.json into
-the project folder, and parallel restores can collide in the NuGet cache. Each release's fast tests run in one process,
+the project folder, and parallel restores can collide in the NuGet cache. Each release's quick tests run in one process,
 and each browser case runs in a process of its own, because Umbraco 17 keeps the first site's services for the whole
 process. Every process has its own temporary folder. Prints one line per release and exits with 1 when any release
 fails.
@@ -16,7 +16,7 @@ fails.
 The Umbraco releases to test, such as 18.2.1. Defaults to every release in UmbracoReleases.
 
 .PARAMETER Browser
-Runs the browser cases instead of the fast tests. Install Chromium first, as docs/DEVELOPING.md describes.
+Runs the browser cases instead of the quick tests. Install Chromium first, as docs/DEVELOPING.md describes.
 AVPF_E2E_CASE selects cases as it does for dotnet test.
 
 .PARAMETER Configuration
@@ -26,7 +26,7 @@ The build configuration. Defaults to Debug.
 Where the builds, logs and temporary files go. Defaults to artifacts/umbraco-releases in the repository.
 
 .PARAMETER Throttle
-How many test processes run at once. Defaults to the number of releases for the fast tests, so every release's fast
+How many test processes run at once. Defaults to the number of releases for the quick tests, so every release's quick
 tests run at once, and to half the processor count for the browser cases.
 
 .PARAMETER SummaryPath
@@ -57,7 +57,7 @@ if (-not $Releases) {
 # the processors at once.
 if ($Throttle -le 0) { $Throttle = $Browser ? [Math]::Max(1, [Math]::Floor([Environment]::ProcessorCount / 2)) : $Releases.Count }
 
-# The browser cases, as SiteEndToEndTests names them. The fast tests run as one unnamed case.
+# The browser cases, as SiteEndToEndTests names them. The quick tests run as one unnamed case.
 $cases = @($null)
 if ($Browser) {
     $cases = @('full', 'iis', 'proxy', 'proxy-root', 'basic-auth')
@@ -84,7 +84,7 @@ $built = foreach ($release in $Releases) {
 # Run each case in its own process, so environment variables and Umbraco's process-wide state stay apart.
 $test = {
     param($release, $folder, $configuration, $case)
-    $name = $case ? "browser-$case" : 'fast'
+    $name = $case ? "browser-$case" : 'quick'
     $temp = Join-Path $folder "temp/$name"
     New-Item -ItemType Directory -Force $temp | Out-Null
     $env:TEMP = $temp

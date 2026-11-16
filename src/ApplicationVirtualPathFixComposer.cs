@@ -1,4 +1,10 @@
 using System.Reflection;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Assets;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.BackOffice;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Diagnostics;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Hosting;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.Media;
+using AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.DependencyInjection.Extensions;
