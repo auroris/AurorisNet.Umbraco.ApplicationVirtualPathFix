@@ -152,6 +152,29 @@ Describe 'One package per Umbraco major version' {
         (& $script -BranchName 'main' -Commit $commit).Version | Should -Be @('18.3.1.2', '17.8.1.1')
     }
 
+    It 'reads the properties from a file with several property groups' {
+        Set-Content -LiteralPath "$fixture/Directory.Build.props" ('<Project><PropertyGroup><Nullable>enable</Nullable></PropertyGroup>' +
+            '<PropertyGroup><UmbracoReleases>17.5.0;17.8.1;18.0.0;18.3.1</UmbracoReleases>' +
+            '<UmbracoMaximumVersion>18.3.1</UmbracoMaximumVersion></PropertyGroup>' +
+            '<PropertyGroup Condition="''$(ContinuousIntegrationBuild)'' == ''true''"><TreatWarningsAsErrors>true</TreatWarningsAsErrors>' +
+            '</PropertyGroup></Project>')
+        (& $script -BranchName 'main' -Commit $commit).Version | Should -Be @('18.3.1.1', '17.8.1.1')
+    }
+
+    It 'reads the repository''s own Directory.Build.props' {
+        # The fixtures above are written for the tests. The file the Release workflow reads can take another shape, so
+        # work out what it says by a different route than the script's and compare.
+        $real = Join-Path $PSScriptRoot '../../Directory.Build.props'
+        Copy-Item -LiteralPath $real -Destination "$fixture/Directory.Build.props"
+        $text = Get-Content -LiteralPath $real -Raw
+        $maximum = [regex]::Match($text, '<UmbracoMaximumVersion>([^<]+)</UmbracoMaximumVersion>').Groups[1].Value
+        $listed = [regex]::Match($text, '<UmbracoReleases>([^<]+)</UmbracoReleases>').Groups[1].Value.Split(';')
+        $expected = @($listed | Group-Object { ([version] $_).Major } | Sort-Object { [int] $_.Name } -Descending |
+            ForEach-Object { "$(($_.Group | Sort-Object { [version] $_ })[-1]).1" })
+        $expected[0] | Should -Be "$maximum.1"
+        (& $script -BranchName 'main' -Commit $commit).Version | Should -Be $expected
+    }
+
     It 'rejects a listed release that is not a release number' {
         Set-Content -LiteralPath "$fixture/Directory.Build.props" ('<Project><PropertyGroup><UmbracoReleases>17.8;18.3.1</UmbracoReleases>' +
             '<UmbracoMaximumVersion>18.3.1</UmbracoMaximumVersion></PropertyGroup></Project>')

@@ -24,7 +24,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $split = [StringSplitOptions]::RemoveEmptyEntries -bor [StringSplitOptions]::TrimEntries
 [xml] $settings = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../Directory.Build.props')
-$listed = @(([string] $settings.Project.PropertyGroup.UmbracoReleases).Split(';', $split) | ForEach-Object { [version] $_ })
+# The file can have several property groups, so find the property by its path rather than through one group.
+$listed = @(([string] $settings.SelectSingleNode('/Project/PropertyGroup/UmbracoReleases').InnerText).Split(';', $split) |
+    ForEach-Object { [version] $_ })
 if (-not $listed) { throw 'Directory.Build.props lists no UmbracoReleases.' }
 if (-not $Published) {
     $Published = (Invoke-RestMethod -Uri 'https://api.nuget.org/v3-flatcontainer/umbraco.cms/index.json' -TimeoutSec 60).versions

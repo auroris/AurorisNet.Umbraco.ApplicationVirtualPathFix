@@ -50,7 +50,8 @@ if (-not $ArtifactsPath) { $ArtifactsPath = Join-Path $repository 'artifacts/umb
 if ($Releases) { $Releases = @($Releases | ForEach-Object { $_.Split(',', [StringSplitOptions]::RemoveEmptyEntries -bor [StringSplitOptions]::TrimEntries) }) }
 if (-not $Releases) {
     [xml] $settings = Get-Content -LiteralPath (Join-Path $repository 'Directory.Build.props')
-    $Releases = ([string] $settings.Project.PropertyGroup.UmbracoReleases).Split(';',
+    # The file can have several property groups, so find the property by its path rather than through one group.
+    $Releases = ([string] $settings.SelectSingleNode('/Project/PropertyGroup/UmbracoReleases').InnerText).Split(';',
         [StringSplitOptions]::RemoveEmptyEntries -bor [StringSplitOptions]::TrimEntries)
 }
 # Each browser case runs a site and Chromium, which keep about two processors busy, so by default run as many as half

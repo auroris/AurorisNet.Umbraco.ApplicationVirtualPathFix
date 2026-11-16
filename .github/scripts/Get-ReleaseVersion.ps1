@@ -32,7 +32,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $releaseNumber = '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 [xml] $settings = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../Directory.Build.props')
-$umbracoVersion = [string] $settings.Project.PropertyGroup.UmbracoMaximumVersion
+
+<#
+.SYNOPSIS
+Returns the value of the property <name> in Directory.Build.props, or an empty string when the file does not set it.
+The file can have several property groups, so the property is found by its path rather than through one group.
+#>
+function Get-BuildProperty([string] $name) {
+    [string] $settings.SelectSingleNode("/Project/PropertyGroup/$name").InnerText
+}
+
+$umbracoVersion = Get-BuildProperty 'UmbracoMaximumVersion'
 if ($umbracoVersion -cnotmatch $releaseNumber) {
     throw 'UmbracoMaximumVersion must contain exactly three numeric components.'
 }
@@ -40,7 +50,7 @@ if ($umbracoVersion -cnotmatch $releaseNumber) {
 # The newest major version's package follows UmbracoMaximumVersion, and each older major version's follows its newest
 # listed release.
 $releases = @($umbracoVersion)
-$listed = @(([string] $settings.Project.PropertyGroup.UmbracoReleases).Split(';',
+$listed = @((Get-BuildProperty 'UmbracoReleases').Split(';',
         [StringSplitOptions]::RemoveEmptyEntries -bor [StringSplitOptions]::TrimEntries))
 foreach ($release in $listed) {
     if ($release -cnotmatch $releaseNumber) { throw "UmbracoReleases lists $release, which must contain exactly three numeric components." }

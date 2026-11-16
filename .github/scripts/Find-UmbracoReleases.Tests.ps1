@@ -29,6 +29,32 @@ Describe 'Finding new Umbraco releases' {
         $found.NewMajors | Should -Be @('19.0.1')
     }
 
+    It 'reads the releases from a file with several property groups' {
+        $script = New-Fixture @('17.8.1', '18.3.1')
+        Set-Content -LiteralPath (Join-Path (Split-Path $script) '../../Directory.Build.props') ('<Project>' +
+            '<PropertyGroup><Nullable>enable</Nullable></PropertyGroup>' +
+            '<PropertyGroup><UmbracoReleases>17.8.1;18.3.1</UmbracoReleases></PropertyGroup>' +
+            '<PropertyGroup Condition="''$(ContinuousIntegrationBuild)'' == ''true''"><TreatWarningsAsErrors>true</TreatWarningsAsErrors>' +
+            '</PropertyGroup></Project>')
+        $found = & $script -Published @('17.8.1', '18.3.1', '18.3.2')
+        $found.Releases | Should -Be @('18.3.2')
+    }
+
+    It 'reads the repository''s own Directory.Build.props' {
+        # The fixtures above are written for the tests. The file the workflow reads can take another shape, so work out
+        # what it lists by a different route than the script's and compare.
+        $script = New-Fixture @('1.0.0')
+        $real = Join-Path $PSScriptRoot '../../Directory.Build.props'
+        Copy-Item -LiteralPath $real -Destination (Join-Path (Split-Path $script) '../../Directory.Build.props')
+        $listed = [regex]::Match((Get-Content -LiteralPath $real -Raw), '<UmbracoReleases>([^<]+)</UmbracoReleases>').Groups[1].Value.Split(';') |
+            ForEach-Object { [version] $_ }
+        $newest = ($listed | Sort-Object)[-1]
+        $next = "$($newest.Major).$($newest.Minor).$($newest.Build + 1)"
+        $found = & $script -Published (@($listed | ForEach-Object { $_.ToString() }) + $next)
+        $found.Releases | Should -Be @($next)
+        $found.NewMajors | Should -BeNullOrEmpty
+    }
+
     It 'finds nothing when the newest releases are listed' {
         $script = New-Fixture @('18.3.1')
         $found = & $script -Published @('18.3.0', '18.3.1', '18.4.0-rc1')
