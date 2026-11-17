@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="26" fill="#1e293b"/>
+  <!-- "~/", the start of an application-relative path. -->
+  <g fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round">
+    <path d="M27 75 C31 63 41 62 47 69 S61 78 66 65"/>
+    <path d="M100 39 L80 95"/>
+  </g>
+</svg>
