@@ -3,6 +3,6 @@
   "Category": "Developer Tools",
   "LicenseTypes": ["Free"],
   "PackageType": "Package",
-  "DocumentationUrl": "https://github.com/auroris/UmbracoApplicationVirtualPathFix#supported-versions",
-  "IssueTrackerUrl": "https://github.com/auroris/UmbracoApplicationVirtualPathFix/issues"
+  "DocumentationUrl": "https://github.com/auroris/AurorisNet.Umbraco.ApplicationVirtualPathFix#supported-versions",
+  "IssueTrackerUrl": "https://github.com/auroris/AurorisNet.Umbraco.ApplicationVirtualPathFix/issues"
 }

@@ -14,9 +14,9 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>
     <!-- The notes of a release are on its GitHub release, which the Release workflow creates under this tag. -->
-    <PackageReleaseNotes>https://github.com/auroris/UmbracoApplicationVirtualPathFix/releases/tag/v$(Version)</PackageReleaseNotes>
-    <PackageProjectUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/auroris/UmbracoApplicationVirtualPathFix</RepositoryUrl>
+    <PackageReleaseNotes>https://github.com/auroris/AurorisNet.Umbraco.ApplicationVirtualPathFix/releases/tag/v$(Version)</PackageReleaseNotes>
+    <PackageProjectUrl>https://github.com/auroris/AurorisNet.Umbraco.ApplicationVirtualPathFix</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/auroris/AurorisNet.Umbraco.ApplicationVirtualPathFix</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <!-- Embed the symbols and generated sources in the assembly. Source Link points the symbols at this commit on
          GitHub, so a site's debugger can step into the package. -->

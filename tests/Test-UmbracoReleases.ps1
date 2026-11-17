@@ -95,9 +95,12 @@ $test = {
     $assembly = Join-Path $folder "artifacts/bin/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests/$($configuration.ToLowerInvariant())/AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests.dll"
     $log = Join-Path $folder "$name.log"
     $filter = $case ? '--filter-class' : '--filter-not-class'
-    dotnet $assembly $filter '*SiteEndToEndTests' *> $log
+    # On a CI runner the test platform colors its output even when it goes to a file, and a color code at the start of
+    # a line hides the summary counts from the patterns below. --no-ansi keeps the log plain; stripping any codes that
+    # remain keeps the counts readable should a later test platform write them anyway.
+    dotnet $assembly $filter '*SiteEndToEndTests' --no-ansi *> $log
     $exitCode = $LASTEXITCODE
-    $lines = Get-Content $log
+    $lines = @(Get-Content $log) -replace '\e\[[0-9;?]*[A-Za-z]', ''
     $counts = @($lines | Select-String -Pattern '^\s+(total|failed|succeeded|skipped): (\d+)')
     $failed = @($lines | Select-String -Pattern '^failed (.+?)( \(\d.*\))?$' | ForEach-Object { $_.Matches[0].Groups[1].Value })
     # The other browser cases skip, so a browser case passes only when its own test succeeded.
