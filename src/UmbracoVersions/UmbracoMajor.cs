@@ -19,7 +19,7 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions;
 /// <para>
 /// Supporting a new major version adds its folders, its subclass and its entry in <see cref="All"/>, and changes no
 /// other major version's. Umbraco 19 runs on .NET 11, so its subclass belongs to a .NET 11 build of the package, where
-/// it can use Umbraco 19's API directly. <c>docs/DEVELOPING.md</c> lists the steps.
+/// it can use Umbraco 19's API directly. The README's "Add an Umbraco major version" section lists the steps.
 /// </para>
 /// </remarks>
 internal abstract class UmbracoMajor

@@ -2,9 +2,9 @@ BeforeAll {
     $script = Join-Path $PSScriptRoot 'Add-UmbracoRelease.ps1'
     <#
     .SYNOPSIS
-    Creates a fixture repository whose Directory.Build.props lists the given releases, with a README that states each
-    major version's releases between markers and a NuGet page that lists them after "running Umbraco ", each beside an
-    example that names other releases. Returns its folder.
+    Creates a fixture repository whose Directory.Build.props lists the given releases, with a README and a page in docs
+    that state each major version's releases between markers, the README beside an example that names other releases.
+    Returns its folder.
     #>
     function New-Fixture([string[]] $releases) {
         $fixture = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
@@ -25,7 +25,7 @@ BeforeAll {
         })
         $rows = $majors | ForEach-Object { "| $($_.Major) | <!-- umbraco-releases $($_.Major) -->$($_.Range)<!-- /umbraco-releases --> |" }
         Set-Content -LiteralPath "$fixture/README.md" (@($rows) + 'For example, 18.3.1.2 supports every Umbraco 18 release up to 18.3.1.')
-        Set-Content -LiteralPath "$fixture/docs/NUGET.md" "Add the package to a website running Umbraco $($majors.Range -join ' or '). For example, 18.3.1.2 supports Umbraco 18.0.0 to 18.3.1."
+        Set-Content -LiteralPath "$fixture/docs/PAGE.md" @($rows)
         $fixture
     }
 
@@ -58,8 +58,7 @@ Describe 'Adding Umbraco releases' {
         $readme | Should -BeLike '*<!-- umbraco-releases 18 -->18.0.0 to 18.3.2<!-- /umbraco-releases -->*'
         $readme | Should -BeLike '*<!-- umbraco-releases 17 -->17.5.0 to 17.8.1<!-- /umbraco-releases -->*'
         $readme | Should -BeLike '*18.3.1.2 supports every Umbraco 18 release up to 18.3.1.*'
-        Get-Text $fixture 'docs/NUGET.md' |
-            Should -BeLike 'Add the package to a website running Umbraco 18.0.0 to 18.3.2 or 17.5.0 to 17.8.1. For example, 18.3.1.2 supports Umbraco 18.0.0 to 18.3.1.*'
+        Get-Text $fixture 'docs/PAGE.md' | Should -BeLike '*<!-- umbraco-releases 18 -->18.0.0 to 18.3.2<!-- /umbraco-releases -->*'
     }
 
     It 'keeps the list oldest first when a release of an older major version arrives' {
@@ -70,25 +69,14 @@ Describe 'Adding Umbraco releases' {
         Get-Property $fixture 'UmbracoVersion' | Should -Be '18.3.1'
         $readme = Get-Text $fixture 'README.md'
         $readme | Should -BeLike '*<!-- umbraco-releases 17 -->17.5.0 to 17.8.2<!-- /umbraco-releases -->*'
-        $readme | Should -BeLike '*<!-- umbraco-releases 18 -->18.3.1<!-- /umbraco-releases -->*'
-        Get-Text $fixture 'docs/NUGET.md' | Should -BeLike '*running Umbraco 18.3.1 or 17.5.0 to 17.8.2. For example*'
-    }
+        $readme | Should -BeLike '*<!-- umbraco-releases 18 -->18.3.1<!-- /umbraco-releases -->*'    }
 
-    It 'lists a third major version''s releases first, and turns a release on its own into a range' {
+    It 'turns a third major version''s release on its own into a range, and leaves the other rows as they are' {
         $fixture = New-Fixture @('17.8.1', '18.3.1', '19.0.0')
         & $script -Releases '19.0.1' -Repository $fixture | Should -Be '19.0.1'
-        Get-Text $fixture 'README.md' | Should -BeLike '*<!-- umbraco-releases 19 -->19.0.0 to 19.0.1<!-- /umbraco-releases -->*'
-        Get-Text $fixture 'docs/NUGET.md' | Should -BeLike '*running Umbraco 19.0.0 to 19.0.1, 18.3.1 or 17.8.1. For example*'
-    }
-
-    It 'changes nothing when the NuGet page has no list of releases' {
-        $fixture = New-Fixture @('17.8.1', '18.3.1')
-        Set-Content -LiteralPath "$fixture/docs/NUGET.md" 'Add the package to a website.'
-        $props = Get-Text $fixture 'Directory.Build.props'
         $readme = Get-Text $fixture 'README.md'
-        { & $script -Releases '18.3.2' -Repository $fixture } | Should -Throw '*NUGET.md has no list of supported releases*'
-        Get-Text $fixture 'Directory.Build.props' | Should -Be $props
-        Get-Text $fixture 'README.md' | Should -Be $readme
+        $readme | Should -BeLike '*<!-- umbraco-releases 19 -->19.0.0 to 19.0.1<!-- /umbraco-releases -->*'
+        $readme | Should -BeLike '*<!-- umbraco-releases 18 -->18.3.1<!-- /umbraco-releases -->*'
     }
 
     It 'accepts several releases in one comma-separated value' {

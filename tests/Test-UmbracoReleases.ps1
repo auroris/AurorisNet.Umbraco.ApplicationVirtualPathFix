@@ -16,7 +16,7 @@ fails.
 The Umbraco releases to test, such as 18.2.1. Defaults to every release in UmbracoReleases.
 
 .PARAMETER Browser
-Runs the browser cases instead of the quick tests. Install Chromium first, as docs/DEVELOPING.md describes.
+Runs the browser cases instead of the quick tests. Install Chromium first, as the README's Developing section describes.
 AVPF_E2E_CASE selects cases as it does for dotnet test.
 
 .PARAMETER Configuration
