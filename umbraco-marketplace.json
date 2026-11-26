@@ -1,8 +1,10 @@
 {
   "$schema": "https://marketplace.umbraco.com/umbraco-marketplace-schema.json",
+  "Title": "Application Virtual Path Fix",
+  "Description": "Fixes backoffice assets, media, preview, login, and initial token refresh when hosting Umbraco 17 or 18 under an application virtual path.",
   "Category": "Developer Tools",
   "LicenseTypes": ["Free"],
   "PackageType": "Package",
-  "DocumentationUrl": "https://github.com/auroris/AurorisNet.Umbraco.ApplicationVirtualPathFix#supported-versions",
+  "DocumentationUrl": "https://github.com/auroris/AurorisNet.Umbraco.ApplicationVirtualPathFix#readme",
   "IssueTrackerUrl": "https://github.com/auroris/AurorisNet.Umbraco.ApplicationVirtualPathFix/issues"
 }
