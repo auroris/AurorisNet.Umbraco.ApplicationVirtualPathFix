@@ -8,6 +8,7 @@ using AurorisNet.Umbraco.ApplicationVirtualPathFix.UmbracoVersions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Umbraco.Cms.Core.Composing;
@@ -44,6 +45,8 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
     {
         var services = builder.Services;
         services.AddVirtualPathHosting();
+        InstallationCookies.Configure(services);
+        services.AddSingleton<BackOfficeAuthFiles>();
         services.AddSingleton<VirtualPathStatus>();
         builder.HealthChecks().Add<VirtualPathHealthCheck>();
         services.AddTransient<ITagHelperComponent, BackOfficeBodyTagHelperComponent>();
@@ -55,10 +58,13 @@ public sealed class ApplicationVirtualPathFixComposer : IComposer
             {
                 WarnOnUnsupportedUmbracoVersion(app.ApplicationServices);
                 var umbraco = AssetPatcher.Release(app.ApplicationServices.GetRequiredService<IUmbracoVersion>().SemanticVersion);
+                var environment = app.ApplicationServices.GetRequiredService<IWebHostEnvironment>();
+                environment.WebRootFileProvider = new CompositeFileProvider(
+                    app.ApplicationServices.GetRequiredService<BackOfficeAuthFiles>(), environment.WebRootFileProvider);
+                app.Use(app.ApplicationServices.GetRequiredService<InstallationCookies>().Apply);
                 if (VirtualPathHosting.Prefix(app.ApplicationServices.GetRequiredService<IHostingEnvironment>()) is { } prefix)
                 {
                     var status = app.ApplicationServices.GetRequiredService<VirtualPathStatus>();
-                    var environment = app.ApplicationServices.GetRequiredService<IWebHostEnvironment>();
                     environment.WebRootFileProvider = new BackOfficeAssetFileProvider(environment.WebRootFileProvider,
                         app.ApplicationServices.GetRequiredService<IBackOfficePathGenerator>(), prefix, umbraco,
                         app.ApplicationServices.GetRequiredService<ILoggerFactory>().CreateLogger(Name), status);

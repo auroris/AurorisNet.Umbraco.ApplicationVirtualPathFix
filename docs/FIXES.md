@@ -25,6 +25,7 @@ match a request that fails in the browser with the fix that covers it. The
 | A rich text stylesheet saved with the stylesheet root, such as `/css/rte.css`, gets the root twice. | Stylesheets load once, saved with or without the root. |
 | The stylesheet of Umbraco's built-in website pages, such as the page for a missing URL and the page shown while no content is published, loads its fonts and backgrounds from the host root. | They load under the prefix. |
 | A fresh browser tries a token refresh before it has a refresh cookie. This row applies at the root too. | It starts sign-in directly. Existing sessions renew as usual. |
+| Multiple installations on the same hostname share cookie names, browser auth broadcasts, refresh locks, and popup targets, so signing into or out of one disrupts another. | Each installation gets its own cookie suffix, virtual-path cookie `Path`, canonical-casing `307` redirect, and scoped backoffice auth modules. |
 
 ## How the fixes apply
 

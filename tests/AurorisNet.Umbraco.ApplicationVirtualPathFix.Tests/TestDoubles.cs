@@ -48,7 +48,7 @@ internal sealed class TestUmbracoVersion(Version version, string prerelease = ""
 /// A hosting environment for a site under <paramref name="prefix"/>. Members the tests don't use throw
 /// <see cref="NotSupportedException"/>.
 /// </summary>
-internal sealed class TestHostingEnvironment(string prefix) : IHostingEnvironment
+internal sealed class TestHostingEnvironment(string prefix, string? siteName = null, string? physicalPath = null) : IHostingEnvironment
 {
     public string ApplicationVirtualPath => prefix;
     /// <summary>
@@ -57,9 +57,9 @@ internal sealed class TestHostingEnvironment(string prefix) : IHostingEnvironmen
     /// </summary>
     public string ToAbsolute(string virtualPath) => virtualPath.StartsWith("~/", StringComparison.Ordinal)
         ? prefix.TrimEnd('/') + virtualPath[1..] : virtualPath;
-    public string? SiteName => throw new NotSupportedException();
+    public string? SiteName => siteName ?? throw new NotSupportedException();
     public string ApplicationId => throw new NotSupportedException();
-    public string ApplicationPhysicalPath => throw new NotSupportedException();
+    public string ApplicationPhysicalPath => physicalPath ?? throw new NotSupportedException();
     public string LocalTempPath => throw new NotSupportedException();
     public bool IsDebugMode => throw new NotSupportedException();
     public bool IsHosted => throw new NotSupportedException();

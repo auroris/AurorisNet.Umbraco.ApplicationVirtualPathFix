@@ -15,16 +15,16 @@ internal sealed class BackOfficePaths : IBackOfficePathGenerator
     internal static readonly string BuildVersion = typeof(BackOfficePaths).Assembly.ManifestModule.ModuleVersionId.ToString("N");
 
     /// <summary>
-    /// Copies Umbraco's backoffice paths and replaces the cache-bust hash with a SHA-256 hash of Umbraco's hash and
-    /// <see cref="BuildVersion"/>.
+    /// Copies Umbraco's backoffice paths and replaces the cache-bust hash with a SHA-256 hash of Umbraco's hash,
+    /// <see cref="BuildVersion"/>, and the installation-scoped auth module hash.
     /// </summary>
-    public BackOfficePaths(IHostingEnvironment environment, IUmbracoVersion version)
+    public BackOfficePaths(IHostingEnvironment environment, IUmbracoVersion version, BackOfficeAuthFiles authFiles)
     {
         var original = new UmbracoBackOfficePathGenerator(environment, version);
         BackOfficePath = original.BackOfficePath;
         BackOfficeVirtualDirectory = original.BackOfficeVirtualDirectory;
         BackOfficeCacheBustHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
-            original.BackOfficeCacheBustHash + BuildVersion)));
+            original.BackOfficeCacheBustHash + BuildVersion + authFiles.ContentHash)));
     }
 
     public string BackOfficePath { get; }
