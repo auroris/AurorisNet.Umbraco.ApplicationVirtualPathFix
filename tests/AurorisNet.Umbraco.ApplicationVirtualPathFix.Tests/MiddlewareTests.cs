@@ -18,14 +18,18 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Tests;
 public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixture<AssetPatchTests.Assets>
 {
     /// <summary>
-    /// Checks that only an HTML request under <c>/umbraco</c> with a differently cased prefix is redirected to the
-    /// configured prefix, keeping its query string; scripts and site pages pass through.
+    /// Checks the casing of the backoffice base URL, including navigation to a deeper route with a query string.
     /// </summary>
     [Theory]
-    [InlineData("/PORTAL/umbraco?code=a%2Fb&state=x", "text/html", true)]
-    [InlineData("/PORTAL/umbraco/backoffice/hash/example.js", "application/javascript", false)]
-    [InlineData("/PORTAL/content", "text/html", false)]
-    public async Task Only_backoffice_navigations_canonicalize_prefix_casing(string path, string accept, bool redirect)
+    [InlineData("/PORTAL/umbraco?code=a%2Fb&state=x", "text/html", "/portal/umbraco?code=a%2Fb&state=x")]
+    [InlineData("/portal/Umbraco", "text/html", "/portal/umbraco")]
+    [InlineData("/portal/UMBRACO/", "text/html", "/portal/umbraco/")]
+    [InlineData("/PORTAL/uMbRaCo/section/Example?key=A%2FB", "text/html", "/portal/umbraco/section/Example?key=A%2FB")]
+    [InlineData("/portal/umbraco/", "text/html", null)]
+    [InlineData("/PORTAL/UMBRACO/backoffice/hash/example.js", "application/javascript", null)]
+    [InlineData("/PORTAL/content", "text/html", null)]
+    [InlineData("/portal/UmbracoForms", "text/html", null)]
+    public async Task Only_backoffice_navigations_canonicalize_base_url_casing(string path, string accept, string? location)
     {
         using var services = new ServiceCollection()
             .AddSingleton<IBackOfficePathGenerator>(new TestBackOfficePaths("/portal")).BuildServiceProvider();
@@ -41,9 +45,9 @@ public sealed class MiddlewareTests(AssetPatchTests.Assets assets) : IClassFixtu
         context.Request.QueryString = new QueryString(url.Query);
         context.Request.Headers.Accept = accept;
         await app.Build()(context);
-        Assert.Equal(!redirect, reachedHandler);
-        Assert.Equal(redirect ? StatusCodes.Status302Found : StatusCodes.Status200OK, context.Response.StatusCode);
-        Assert.Equal(redirect ? "/portal/umbraco?code=a%2Fb&state=x" : "", context.Response.Headers.Location.ToString());
+        Assert.Equal(location is null, reachedHandler);
+        Assert.Equal(location is null ? StatusCodes.Status200OK : StatusCodes.Status302Found, context.Response.StatusCode);
+        Assert.Equal(location ?? "", context.Response.Headers.Location.ToString());
     }
 
     /// <summary>

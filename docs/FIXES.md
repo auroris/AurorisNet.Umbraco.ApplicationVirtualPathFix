@@ -10,7 +10,7 @@ match a request that fails in the browser with the fix that covers it. The
 | The rewrite rule for cache-busted backoffice assets looks for the virtual path in `Request.Path`, after the host has moved it to `Request.PathBase`. | Script and stylesheet requests reach Umbraco's handlers. |
 | The import map contains root-absolute URLs. | Imports and scopes carry the prefix. |
 | The backoffice builds API and OAuth URLs from the origin and `/umbraco`. | It uses the origin plus the configured path, and the OAuth callbacks include the prefix. |
-| A bookmark with a differently cased prefix reaches the server, but the backoffice router rejects it. | Page requests under `/umbraco` redirect to the configured casing and keep the query string. |
+| A bookmark with a differently cased virtual path or `/umbraco` segment opens the backoffice shell at an unrecognized route. | Page requests redirect to the configured virtual path and lowercase `/umbraco`, preserving the remaining path and query string. |
 | The sign-in page sends its requests to the host root. | Sign-in, two-factor, password-reset and invitation requests use the prefix. |
 | Password-reset and invitation emails link to `/umbraco/login` at the host root. | The links include the path. |
 | Media outside `wwwroot`, or in a provider such as Azure Blob Storage, is mounted at the prefixed path, which requests under a path base never match. | Media is served under the prefix, to the static-file handler and to ImageSharp. |

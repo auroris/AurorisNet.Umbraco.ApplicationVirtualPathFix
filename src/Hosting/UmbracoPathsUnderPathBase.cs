@@ -25,14 +25,15 @@ namespace AurorisNet.Umbraco.ApplicationVirtualPathFix.Hosting;
 /// </remarks>
 internal static class UmbracoPathsUnderPathBase
 {
+    private static readonly PathString BackOfficeRoot = "/umbraco";
     private static readonly PathString AssetsRoot = "/umbraco/backoffice";
     private static readonly PathString BasicAuth = "/umbraco/basic-auth";
     private static readonly PathString ManagementContract = "/umbraco/management/api/openapi.json";
 
     /// <summary>
     /// Adds middleware that restores the virtual path for the requests in this class's remarks and corrects the doubled
-    /// prefix in basic-auth redirects. It also redirects page requests under <c>/umbraco</c> whose prefix differs from
-    /// the configured one only in case. Adds nothing when no virtual path is configured. <paramref name="umbraco"/> is
+    /// prefix in basic-auth redirects. It also corrects the casing of the virtual path and <c>/umbraco</c> segment
+    /// in backoffice page URLs. Adds nothing when no virtual path is configured. <paramref name="umbraco"/> is
     /// the site's Umbraco major version.
     /// </summary>
     /// <remarks>Register it after <c>UsePathBase</c> and before <c>UseUmbraco</c>.</remarks>
@@ -53,13 +54,13 @@ internal static class UmbracoPathsUnderPathBase
             var originalPathBase = request.PathBase;
             // The path base matches the prefix in any case, but the backoffice router compares its base URL exactly.
             // Redirect page navigations to the configured spelling.
-            if (string.Equals(originalPathBase.Value, virtualPath.Value, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(originalPathBase.Value, virtualPath.Value, StringComparison.Ordinal)
-                && originalPath.StartsWithSegments("/umbraco")
+            if (originalPathBase.Equals(virtualPath, StringComparison.OrdinalIgnoreCase)
+                && originalPath.StartsWithSegments(BackOfficeRoot, StringComparison.OrdinalIgnoreCase, out var matched, out var remaining)
+                && (!originalPathBase.Equals(virtualPath, StringComparison.Ordinal) || !matched.Equals(BackOfficeRoot, StringComparison.Ordinal))
                 && (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
                 && request.Headers.Accept.ToString().Contains("text/html", StringComparison.OrdinalIgnoreCase))
             {
-                context.Response.Redirect(virtualPath.Add(originalPath).ToUriComponent() + request.QueryString);
+                context.Response.Redirect(virtualPath.Add(BackOfficeRoot).Add(remaining).ToUriComponent() + request.QueryString);
                 return;
             }
             if (!originalPathBase.HasValue || !ComparedWithVirtualPath(originalPath, hashedAssets, umbraco.ApiDocuments))
